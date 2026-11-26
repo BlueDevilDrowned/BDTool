@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BDTool.Mcp</RootNamespace>
+    <AssemblyName>bdtool-mcp</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BDTool.Contracts\BDTool.Contracts.csproj" />
+    <ProjectReference Include="..\BDTool.Application\BDTool.Application.csproj" />
+    <ProjectReference Include="..\BDTool.Composition\BDTool.Composition.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+    <PackageReference Include="ModelContextProtocol" Version="2.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\catalog\operations.json" Link="catalog\operations.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -1,7 +1,7 @@
 using System;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using BDTool.Application.Serialization;
 using BDTool.Contracts.Operations;
 
 namespace BDTool.Cli;
@@ -21,16 +21,7 @@ public static class CliOutput
     /// </summary>
     public static string SerializeResult(OperationResult result)
     {
-        ArgumentNullException.ThrowIfNull(result);
-
-        var document = JsonSerializer.SerializeToNode(result, result.GetType(), s_options) as JsonObject
-            ?? new JsonObject();
-        if (!document.TryGetPropertyValue("data", out var data) || data is null)
-        {
-            document["data"] = new JsonObject();
-        }
-
-        return document.ToJsonString(s_options);
+        return OperationResultJsonSerializer.Serialize(result);
     }
 
     /// <summary>序列化任意协议 DTO；活动查询结果沿用同一套 camelCase 与字符串枚举。</summary>

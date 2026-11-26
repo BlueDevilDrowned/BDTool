@@ -48,12 +48,56 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
-    public void Application_And_Cli_DoNotDependOnProvider()
+    public void Frontends_DoNotDependOnProvider()
     {
-        foreach (var projectName in new[] { "BDTool.Application", "BDTool.Cli" })
+        foreach (var projectName in new[] { "BDTool.Application", "BDTool.Cli", "BDTool.Mcp" })
         {
             AssertNoProviderReference(projectName);
         }
+    }
+
+    [Fact]
+    public void Mcp_UsesApplicationLayerAndPinnedOfficialSdk()
+    {
+        var document = XDocument.Load(RepoPaths.ProjectFile("BDTool.Mcp"));
+        var references = GetProjectReferences(document).OrderBy(value => value).ToArray();
+        Assert.Equal(
+            new[] { "BDTool.Application", "BDTool.Composition", "BDTool.Contracts" },
+            references);
+
+        var packages = document.Descendants()
+            .Where(element => element.Name.LocalName == "PackageReference")
+            .ToDictionary(
+                element => ((string?)element.Attribute("Include")) ?? string.Empty,
+                element => ((string?)element.Attribute("Version")) ?? string.Empty,
+                StringComparer.Ordinal);
+        Assert.Equal("2.4.0", packages["ModelContextProtocol"]);
+        Assert.Equal("10.0.14", packages["Microsoft.Extensions.Hosting"]);
+
+        var sourceDirectory = Path.Combine(RepoPaths.Root, "src", "BDTool.Mcp");
+        var mcpSources = Directory.EnumerateFiles(sourceDirectory, "*.cs", SearchOption.AllDirectories)
+            .Select(File.ReadAllText)
+            .ToArray();
+        var forbiddenUsingPrefixes = new[]
+        {
+            "System.Diagnostics",
+            "UnityEditor",
+            "UnityEngine",
+            "BDTool.Provider"
+        };
+        var violations = Directory.EnumerateFiles(sourceDirectory, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => File.ReadLines(file)
+                .Select(line => line.TrimStart())
+                .Where(line => line.StartsWith("using ", StringComparison.Ordinal))
+                .Where(line => forbiddenUsingPrefixes.Any(prefix => line.Contains(prefix, StringComparison.Ordinal)))
+                .Select(line => Path.GetFileName(file) + ": " + line))
+            .ToArray();
+        Assert.Empty(violations);
+        Assert.DoesNotContain(mcpSources, text => text.Contains("--unity-cli", StringComparison.Ordinal));
+        Assert.DoesNotContain(mcpSources, text => text.Contains("--unity-editor", StringComparison.Ordinal));
+
+        var solution = File.ReadAllText(Path.Combine(RepoPaths.Root, "BDTool.sln"));
+        Assert.Contains("BDTool.Mcp.csproj", solution, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -330,6 +374,7 @@ public sealed class ArchitectureTests
             "BDTool.Cli",
             "BDTool.Provider.Local",
             "BDTool.Provider.Akio",
+            "BDTool.Mcp",
             "BDTool.Tests"
         };
 

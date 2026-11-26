@@ -676,7 +676,7 @@ public static class CliEntrypoint
         writer.WriteLine("  bdtool activity list|show <activityId> [--project <path>] [--human]");
         writer.WriteLine("  bdtool --version | --help");
         writer.WriteLine();
-        writer.WriteLine("M4 范围: 本地 Workspace、可选 Editor 能力与项目级 Codex Skill；Skill 只通过 bdtool 稳定 CLI 调用。");
+        writer.WriteLine("M5 范围: 本地 Workspace、可选 Editor、项目级 Codex Skill 与 stdio MCP Adapter；MCP 只经 Application 执行 catalog 操作。");
         writer.WriteLine("unity-cli 发现顺序: --unity-cli → BDTOOL_UNITY_CLI_PATH → 当前目录及祖先 .tools/unity-cli → PATH（只读，不改 PATH）。");
         writer.WriteLine();
         writer.WriteLine("退出码:");
