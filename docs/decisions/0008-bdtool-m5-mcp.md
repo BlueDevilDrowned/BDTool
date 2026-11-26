@@ -2,6 +2,7 @@
 
 - 状态：实现与真实 stdio 端到端验证完成
 - 日期：2026-11-26
+- 产品版本：`1.0.0`，里程碑：`M5`
 
 ## 范围
 
@@ -87,6 +88,7 @@ startup_timeout_sec = 30
 - Release 构建成功，0 警告、0 错误。
 - 全量 .NET 测试 465/465 通过。
 - `dotnet format --verify-no-changes` 通过。
+- `bdtool` 与 `bdtool-mcp` 的 `--version` 均报告产品版本 `1.0.0`；CLI 同时报告里程碑 `M5`。
 - SDK 客户端启动真实 `bdtool-mcp` stdio 子进程：
   - 发现 12 个 Tool 和 2 个 Resource；
   - Tool ID 与 catalog 完全一致；

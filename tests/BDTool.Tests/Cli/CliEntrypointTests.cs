@@ -45,7 +45,7 @@ public sealed class CliEntrypointTests
         Assert.Equal(JsonValueKind.Object, data.ValueKind);
         Assert.Equal("ready", data.GetProperty("state").GetString());
         Assert.Equal("M5", data.GetProperty("milestone").GetString());
-        Assert.Equal("0.5.0", data.GetProperty("appVersion").GetString());
+        Assert.Equal("1.0.0", data.GetProperty("appVersion").GetString());
         Assert.Equal(BDToolContract.Version, data.GetProperty("contractVersion").GetString());
         Assert.Equal(Path.GetFullPath(project.ProjectPath), data.GetProperty("projectPath").GetString());
 
@@ -649,7 +649,7 @@ public sealed class CliEntrypointTests
         var (exitCode, stdout, stderr) = await RunAsync("--version");
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("bdtool 0.5.0", stdout, StringComparison.Ordinal);
+        Assert.Contains("bdtool 1.0.0", stdout, StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr);
     }
 

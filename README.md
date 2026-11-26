@@ -5,7 +5,7 @@ BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace P
 ## 当前状态
 
 - 已冻结解决方案、程序集、命名空间与 CLI 可执行名：`BDTool` / `bdtool`。
-- 产品版本 `0.5.0`，里程碑 `M5`；`BDToolIdentity` 与 `Directory.Build.props` 为 `0.5.0`。Akio Editor Provider 行为未变，仍声明实现版本 `0.3.0`。
+- 产品版本 `1.0.0`，里程碑 `M5`；`BDToolIdentity` 与 `Directory.Build.props` 为 `1.0.0`。Akio Editor Provider 行为未变，仍声明实现版本 `0.3.0`。
 - 目录共十二个操作：全部已注册 Handler 并标记为 `available`，包括 M1 的 `system.doctor`、`operations.list`、`operations.describe`、`project.context`、`workspace.read`、`workspace.search`、`workspace.fingerprint`、`workspace.apply`，M2 的 `project.inspect`、`project.probe`，以及 M3 的 `project.asset-snapshot`、`project.prefab-set-active`。
 - M4 新增两个项目级 Skill。安装目标固定为 `<project>/.agents/skills/<skill>`；只有带合法 `.bdtool-managed` 标记的目录可被更新，未受管同名目录会使整次安装失败且不写入另一个 Skill。
 - M5 新增 `BDTool.Mcp`，可执行名为 `bdtool-mcp`。MCP 工具直接来自 catalog，输入/输出 Schema 与 CLI 相同；调用统一进入 Application Gateway，并写 `source=mcp` 的 Activity。

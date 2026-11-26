@@ -82,7 +82,7 @@ public sealed class CliProcessTests
         Assert.Equal(JsonValueKind.Object, data.ValueKind);
         Assert.Equal("ready", data.GetProperty("state").GetString());
         Assert.Equal("M5", data.GetProperty("milestone").GetString());
-        Assert.Equal("0.5.0", data.GetProperty("appVersion").GetString());
+        Assert.Equal("1.0.0", data.GetProperty("appVersion").GetString());
 
         // Unity 未接入，进程级报告也必须保持 connected=false / skipped。
         var unity = data.GetProperty("unity");
@@ -120,7 +120,7 @@ public sealed class CliProcessTests
         var result = await RunBdtoolAsync(project.ProjectPath, "--version");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("bdtool 0.5.0", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("bdtool 1.0.0", result.Stdout, StringComparison.Ordinal);
         Assert.Contains("milestone M5", result.Stdout, StringComparison.Ordinal);
         Assert.Equal(string.Empty, result.Stderr);
     }
