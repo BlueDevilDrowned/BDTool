@@ -1,4 +1,6 @@
+using System;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using BDTool.Contracts.Operations;
 
@@ -12,10 +14,23 @@ public static class CliOutput
 {
     private static readonly JsonSerializerOptions s_options = CreateOptions();
 
-    /// <summary>序列化操作结果，保留实际泛型 Data 形状。</summary>
+    /// <summary>
+    /// 序列化操作结果，保留实际泛型 Data 形状；没有 typed DTO 的结果
+    /// （参数、初始化、未知操作等非泛型失败）统一补空对象 data，保证信封形状稳定。
+    /// 不使用 data:null，避免调用方必须区分两种“无数据”表示。
+    /// </summary>
     public static string SerializeResult(OperationResult result)
     {
-        return JsonSerializer.Serialize(result, result.GetType(), s_options);
+        ArgumentNullException.ThrowIfNull(result);
+
+        var document = JsonSerializer.SerializeToNode(result, result.GetType(), s_options) as JsonObject
+            ?? new JsonObject();
+        if (!document.TryGetPropertyValue("data", out var data) || data is null)
+        {
+            document["data"] = new JsonObject();
+        }
+
+        return document.ToJsonString(s_options);
     }
 
     /// <summary>序列化任意协议 DTO；活动查询结果沿用同一套 camelCase 与字符串枚举。</summary>

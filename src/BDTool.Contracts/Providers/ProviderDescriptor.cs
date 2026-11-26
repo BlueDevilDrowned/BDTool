@@ -41,6 +41,10 @@ namespace BDTool.Contracts.Providers
     /// <summary>首批已冻结的公共能力 ID。</summary>
     public static class CapabilityIds
     {
+        public const string WorkspaceRead = "workspace.read";
+        public const string WorkspaceWrite = "workspace.write";
+        public const string WorkspaceSearch = "workspace.search";
+        public const string WorkspaceFingerprint = "workspace.fingerprint";
         public const string EditorStatus = "editor.status";
     }
 }

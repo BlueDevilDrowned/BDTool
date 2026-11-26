@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BDTool.Contracts;
@@ -7,17 +9,34 @@ using BDTool.Contracts.Errors;
 using BDTool.Contracts.Operations;
 using BDTool.Contracts.Providers;
 using BDTool.Core;
+using BDTool.Operations.Handlers;
+using BDTool.Operations.Input;
 
 namespace BDTool.Operations.Diagnostics;
 
 /// <summary>
-/// M0 的 system.doctor 实现。只检查应用自身、项目目录与 Activity 存储是否可用，
-/// 不启动或连接 Unity；Unity 状态在结果中固定为未连接，避免把环境探测误报为集成成功。
+/// M1 的 system.doctor 实现。检查应用自身、项目目录、Activity 存储与本地 Provider 快照，
+/// 不启动或连接 Unity；Unity 状态固定为未连接，避免把环境探测误报为集成成功。
 /// </summary>
 public sealed class DoctorHandler : IOperationHandler
 {
     /// <summary>目录中冻结的 doctor 操作 ID。</summary>
     public const string StableOperationId = "system.doctor";
+
+    /// <summary>当前运行时里程碑；值来自 Core 产品身份，避免 Doctor 与 --version 漂移。</summary>
+    public const string CurrentMilestone = BDToolIdentity.Milestone;
+
+    /// <summary>Provider 可用性检查的稳定 ID，失败时用于把诊断字段挂到正确检查上。</summary>
+    private const string ProviderCheckId = "providers.available";
+
+    /// <summary>M1 要求 Workspace Provider 上报的四项能力，缺失任一项都视为描述不完整。</summary>
+    private static readonly string[] RequiredWorkspaceCapabilities =
+    {
+        CapabilityIds.WorkspaceRead,
+        CapabilityIds.WorkspaceWrite,
+        CapabilityIds.WorkspaceSearch,
+        CapabilityIds.WorkspaceFingerprint
+    };
 
     private readonly IDoctorEnvironmentProbe _probe;
     private readonly IOperationCatalog _catalog;
@@ -27,7 +46,7 @@ public sealed class DoctorHandler : IOperationHandler
 
     /// <summary>
     /// 依赖由组合根显式注入：环境探测在本机执行，目录用于确认 doctor 自身已登记，
-    /// Provider 列表必须反映当前真实装配结果（M0 为空）。
+    /// Provider 列表必须反映当前真实装配结果（M1 包含 Local Workspace Provider）。
     /// </summary>
     public DoctorHandler(
         IDoctorEnvironmentProbe probe,
@@ -54,13 +73,28 @@ public sealed class DoctorHandler : IOperationHandler
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // system.doctor 的 inputSchema 是严格空对象（additionalProperties=false），
+        // Handler 必须做同样的校验：任何输入属性都说明调用方误解了操作契约，
+        // 静默忽略会把拼写错误或过时字段当成成功执行。
+        try
+        {
+            using var input = OperationInputParser.ParseObject(request.InputJson);
+        }
+        catch (OperationInputException exception)
+        {
+            return OperationResults.Failure<DoctorReport>(
+                ErrorCodes.InvalidArgument,
+                "input",
+                exception.Message);
+        }
+
         // 请求未携带项目路径时（例如进程内调用）使用组合根给出的默认项目。
         var projectPath = string.IsNullOrWhiteSpace(request.ProjectPath)
             ? _defaultProjectPath
             : request.ProjectPath;
 
         var snapshot = await _probe.ProbeAsync(projectPath, cancellationToken).ConfigureAwait(false);
-        var report = BuildReport(snapshot);
+        var report = BuildReport(snapshot, out var providerAudit);
         var result = new OperationResult<DoctorReport> { Data = report };
 
         var failed = report.Checks.FindAll(check => check.Status == DoctorCheckStatuses.Fail);
@@ -80,11 +114,7 @@ public sealed class DoctorHandler : IOperationHandler
                 ? "项目路径不存在，doctor 无法完成检查。"
                 : "doctor 检查未通过：" + failed[0].Title + "。",
             Retryable = false,
-            Details = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["checkId"] = failed[0].Id,
-                ["projectPath"] = report.ProjectPath
-            }
+            Details = BuildFailureDetails(failed[0], report, providerAudit)
         });
         return result;
     }
@@ -93,7 +123,7 @@ public sealed class DoctorHandler : IOperationHandler
     /// 把探测快照映射为逐项检查。状态汇总只看 fail/warn：
     /// 任一 fail 为 not-ready，仅有 warn 为 degraded，其余为 ready。
     /// </summary>
-    private DoctorReport BuildReport(DoctorEnvironmentSnapshot snapshot)
+    private DoctorReport BuildReport(DoctorEnvironmentSnapshot snapshot, out ProviderAudit providerAudit)
     {
         var catalogCount = _catalog.GetAll().Count;
         var doctorRegistered = _catalog.Find(StableOperationId) is not null;
@@ -103,13 +133,13 @@ public sealed class DoctorHandler : IOperationHandler
             AppName = BDToolIdentity.ProductName,
             AppVersion = _appVersion,
             ContractVersion = BDToolContract.Version,
-            Milestone = BDToolIdentity.Milestone,
+            Milestone = CurrentMilestone,
             ProjectPath = snapshot.ProjectPath,
             StateRoot = snapshot.StateRoot,
             ActivityRoot = snapshot.ActivityRoot,
             Providers = new List<ProviderDescriptor>(_providers),
             Unity = new UnityConnectionReport(),
-            Note = "M0 仅验证应用自身、项目目录与 Activity 存储；不连接 Unity。"
+            Note = "M1 验证应用自身、项目目录、Activity 存储与本地 Workspace Provider；不连接 Unity。"
         };
 
         report.Checks.Add(Check(
@@ -150,15 +180,11 @@ public sealed class DoctorHandler : IOperationHandler
                 ? "已加载 " + catalogCount + " 个操作，包含 " + StableOperationId + "。"
                 : "操作目录缺少 " + StableOperationId + "。"));
 
-        report.Checks.Add(Check(
-            "providers.empty",
-            "Provider 列表",
-            _providers.Count == 0 ? DoctorCheckStatuses.Pass : DoctorCheckStatuses.Warn,
-            _providers.Count == 0
-                ? "当前构建未装配 Provider（0 个）。"
-                : "当前构建装配了 " + _providers.Count + " 个 Provider；M0 预期为空。"));
+        var providerValidation = ValidateProviders();
+        providerAudit = providerValidation.Audit;
+        report.Checks.Add(providerValidation.Check);
 
-        // M0 明确跳过 Unity：跳过不等于失败，但也不代表可用。
+        // M1 明确跳过 Unity：跳过不等于失败，但也不代表可用。
         report.Checks.Add(Check(
             "unity.connection",
             "Unity 连接",
@@ -181,6 +207,333 @@ public sealed class DoctorHandler : IOperationHandler
         return report;
     }
 
+    /// <summary>
+    /// 构造失败诊断详情。Provider 检查失败时补充稳定的机器可读字段；
+    /// 其余检查沿用 checkId/projectPath，避免调用方依赖自由文本排障。
+    /// </summary>
+    private static Dictionary<string, string> BuildFailureDetails(
+        DoctorCheck failedCheck,
+        DoctorReport report,
+        ProviderAudit providerAudit)
+    {
+        var details = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["checkId"] = failedCheck.Id,
+            ["projectPath"] = report.ProjectPath
+        };
+
+        // 只有 Provider 检查本身失败时才附加 Provider 字段，防止把首个失败的
+        // 其他检查（例如 project.path）误标成 Provider 问题。
+        if (!providerAudit.HasFailure
+            || !string.Equals(failedCheck.Id, ProviderCheckId, StringComparison.Ordinal))
+        {
+            return details;
+        }
+
+        details["reason"] = providerAudit.ReasonCode;
+        details["providerIndex"] = providerAudit.ProviderIndex.ToString(CultureInfo.InvariantCulture);
+        details["providerId"] = providerAudit.ProviderId;
+        details["providerCount"] = providerAudit.ProviderCount.ToString(CultureInfo.InvariantCulture);
+        details["expectedContractVersion"] = BDToolContract.Version;
+        details["actualContractVersion"] = providerAudit.ActualContractVersion;
+        if (providerAudit.MissingCapabilities.Length > 0)
+        {
+            details["missingCapabilities"] = providerAudit.MissingCapabilities;
+        }
+
+        return details;
+    }
+
+    /// <summary>
+    /// 校验真实装配的 Provider 描述，不按品牌分支。硬性条件：ID 唯一且非空、
+    /// Kind 属于已冻结类别、契约版本一致、实现版本非空；Workspace Provider
+    /// 还必须上报四项能力为 true。DisplayName 缺失只降级为 warn，因为它是
+    /// 展示字段，不影响能力判断，但必须让调用方看到描述不完整。
+    /// 空列表保持 M1 既有的 degraded 语义：应用自身可运行，但没有可执行 Provider。
+    /// </summary>
+    private ProviderValidation ValidateProviders()
+    {
+        if (_providers.Count == 0)
+        {
+            return new ProviderValidation(
+                Check(
+                    ProviderCheckId,
+                    "Provider 可用性",
+                    DoctorCheckStatuses.Warn,
+                    "当前构建未装配 Provider。"),
+                default);
+        }
+
+        var segments = new List<string>(_providers.Count);
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        var anyWarning = false;
+        var workspaceProviderFound = false;
+        var audit = default(ProviderAudit);
+
+        for (var index = 0; index < _providers.Count; index++)
+        {
+            var provider = _providers[index];
+            if (provider is null)
+            {
+                // 组合根正常不会传 null；这里仍给出稳定原因，避免空引用掩盖装配缺陷。
+                segments.Add(
+                    "provider[" + index.ToString(CultureInfo.InvariantCulture) +
+                    "]{status=fail; reasons=PROVIDER_DESCRIPTOR_NULL}");
+                if (!audit.HasFailure)
+                {
+                    audit = new ProviderAudit(
+                        "PROVIDER_DESCRIPTOR_NULL",
+                        index,
+                        string.Empty,
+                        string.Empty,
+                        string.Empty,
+                        _providers.Count);
+                }
+
+                continue;
+            }
+
+            var providerId = provider.Id is null ? string.Empty : provider.Id;
+            var kind = provider.Kind is null ? string.Empty : provider.Kind;
+            var contractVersion = provider.ContractVersion is null ? string.Empty : provider.ContractVersion;
+            var implementationVersion = provider.ImplementationVersion is null ? string.Empty : provider.ImplementationVersion;
+            var displayName = provider.DisplayName is null ? string.Empty : provider.DisplayName;
+
+            var reasons = new List<string>();
+            var warnings = new List<string>();
+            var missingCapabilities = new List<string>();
+
+            if (string.IsNullOrWhiteSpace(providerId))
+            {
+                reasons.Add("PROVIDER_ID_EMPTY");
+            }
+            else if (!seenIds.Add(providerId))
+            {
+                reasons.Add("PROVIDER_ID_DUPLICATE");
+            }
+
+            var kindValid = IsKnownProviderKind(kind);
+            if (!kindValid)
+            {
+                reasons.Add("PROVIDER_KIND_INVALID");
+            }
+
+            if (!string.Equals(contractVersion, BDToolContract.Version, StringComparison.Ordinal))
+            {
+                reasons.Add("PROVIDER_CONTRACT_MISMATCH");
+            }
+
+            if (string.IsNullOrWhiteSpace(implementationVersion))
+            {
+                reasons.Add("PROVIDER_IMPLEMENTATION_VERSION_EMPTY");
+            }
+
+            if (string.Equals(kind, ProviderKinds.Workspace, StringComparison.Ordinal))
+            {
+                workspaceProviderFound = true;
+                CollectMissingCapabilities(provider.Capabilities, missingCapabilities);
+                if (missingCapabilities.Count > 0)
+                {
+                    reasons.Add("PROVIDER_CAPABILITIES_MISSING");
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                warnings.Add("PROVIDER_DISPLAY_NAME_EMPTY");
+                anyWarning = true;
+            }
+
+            var providerStatus = reasons.Count > 0
+                ? DoctorCheckStatuses.Fail
+                : warnings.Count > 0
+                    ? DoctorCheckStatuses.Warn
+                    : DoctorCheckStatuses.Pass;
+
+            segments.Add(BuildProviderSegment(
+                index,
+                providerId,
+                kind,
+                kindValid,
+                contractVersion,
+                implementationVersion,
+                displayName,
+                provider.Capabilities,
+                missingCapabilities,
+                providerStatus,
+                reasons,
+                warnings));
+
+            if (reasons.Count > 0 && !audit.HasFailure)
+            {
+                audit = new ProviderAudit(
+                    reasons[0],
+                    index,
+                    providerId,
+                    contractVersion,
+                    string.Join(",", missingCapabilities),
+                    _providers.Count);
+            }
+        }
+
+        // M1 的可用性来自 Workspace Provider；只有 Editor Provider 时不能报告 ready。
+        if (!workspaceProviderFound && !audit.HasFailure)
+        {
+            audit = new ProviderAudit(
+                "PROVIDER_WORKSPACE_MISSING",
+                -1,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                _providers.Count);
+            segments.Add("workspaceProvider=none{status=fail; reasons=PROVIDER_WORKSPACE_MISSING}");
+        }
+
+        var status = audit.HasFailure
+            ? DoctorCheckStatuses.Fail
+            : anyWarning
+                ? DoctorCheckStatuses.Warn
+                : DoctorCheckStatuses.Pass;
+
+        return new ProviderValidation(
+            Check(ProviderCheckId, "Provider 可用性", status, string.Join(" | ", segments)),
+            audit);
+    }
+
+    /// <summary>四项 Workspace 能力逐项检查；能力字典为 null 时按四项全缺处理。</summary>
+    private static void CollectMissingCapabilities(
+        Dictionary<string, bool>? capabilities,
+        List<string> missing)
+    {
+        foreach (var capability in RequiredWorkspaceCapabilities)
+        {
+            var enabled = capabilities is not null
+                && capabilities.TryGetValue(capability, out var value)
+                && value;
+            if (!enabled)
+            {
+                missing.Add(capability);
+            }
+        }
+    }
+
+    private static bool IsKnownProviderKind(string kind) =>
+        string.Equals(kind, ProviderKinds.Workspace, StringComparison.Ordinal)
+        || string.Equals(kind, ProviderKinds.Editor, StringComparison.Ordinal);
+
+    /// <summary>
+    /// 生成固定键名的单行诊断段，便于人工排障与测试断言；
+    /// 自由文本仅 DisplayName 一处，不参与状态判定。
+    /// </summary>
+    private static string BuildProviderSegment(
+        int index,
+        string providerId,
+        string kind,
+        bool kindValid,
+        string contractVersion,
+        string implementationVersion,
+        string displayName,
+        Dictionary<string, bool>? capabilities,
+        List<string> missingCapabilities,
+        string status,
+        List<string> reasons,
+        List<string> warnings)
+    {
+        var builder = new StringBuilder();
+        builder.Append("provider[")
+            .Append(index.ToString(CultureInfo.InvariantCulture))
+            .Append("]{id=").Append(providerId)
+            .Append("; kind=").Append(kind.Length == 0 ? "<empty>" : kind)
+            .Append("; kindValid=").Append(kindValid ? "true" : "false")
+            .Append("; contract=").Append(contractVersion.Length == 0 ? "<empty>" : contractVersion)
+            .Append("; implementation=").Append(implementationVersion.Length == 0 ? "<empty>" : implementationVersion)
+            .Append("; displayName=").Append(displayName.Length == 0 ? "<empty>" : displayName)
+            .Append("; capabilities=");
+
+        if (capabilities is null)
+        {
+            builder.Append("<null>");
+        }
+        else
+        {
+            for (var i = 0; i < RequiredWorkspaceCapabilities.Length; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(',');
+                }
+
+                var capability = RequiredWorkspaceCapabilities[i];
+                var enabled = capabilities.TryGetValue(capability, out var value) && value;
+                builder.Append(capability).Append('=').Append(enabled ? "true" : "false");
+            }
+        }
+
+        builder.Append("; status=").Append(status);
+        if (missingCapabilities.Count > 0)
+        {
+            builder.Append("; missing=").Append(string.Join(",", missingCapabilities));
+        }
+
+        if (reasons.Count > 0)
+        {
+            builder.Append("; reasons=").Append(string.Join(",", reasons));
+        }
+
+        if (warnings.Count > 0)
+        {
+            builder.Append("; warnings=").Append(string.Join(",", warnings));
+        }
+
+        builder.Append('}');
+        return builder.ToString();
+    }
+
     private static DoctorCheck Check(string id, string title, string status, string detail) =>
         new DoctorCheck { Id = id, Title = title, Status = status, Detail = detail };
+
+    /// <summary>Provider 检查结果与失败定位信息，供报告和失败信封共用。</summary>
+    private readonly struct ProviderValidation
+    {
+        public ProviderValidation(DoctorCheck check, ProviderAudit audit)
+        {
+            Check = check;
+            Audit = audit;
+        }
+
+        public DoctorCheck Check { get; }
+        public ProviderAudit Audit { get; }
+    }
+
+    /// <summary>
+    /// Provider 校验的失败定位。只在硬性条件失败时填充；
+    /// 成功或仅告警时保持 default，避免把告警误报为失败。
+    /// </summary>
+    private readonly struct ProviderAudit
+    {
+        public ProviderAudit(
+            string reasonCode,
+            int providerIndex,
+            string providerId,
+            string actualContractVersion,
+            string missingCapabilities,
+            int providerCount)
+        {
+            ReasonCode = reasonCode;
+            ProviderIndex = providerIndex;
+            ProviderId = providerId;
+            ActualContractVersion = actualContractVersion;
+            MissingCapabilities = missingCapabilities;
+            ProviderCount = providerCount;
+        }
+
+        public string ReasonCode { get; }
+        public int ProviderIndex { get; }
+        public string ProviderId { get; }
+        public string ActualContractVersion { get; }
+        public string MissingCapabilities { get; }
+        public int ProviderCount { get; }
+
+        public bool HasFailure => !string.IsNullOrEmpty(ReasonCode);
+    }
 }

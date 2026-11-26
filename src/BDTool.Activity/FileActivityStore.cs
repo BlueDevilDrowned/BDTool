@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using BDTool.Contracts.Activity;
 using BDTool.Contracts.Artifacts;
+using BDTool.Core.IO;
 using BDTool.Core.Projects;
 
 namespace BDTool.Activity;
@@ -17,7 +18,7 @@ namespace BDTool.Activity;
 /// Activity 的本地文件实现。每次调用写独立 JSON 文件，读取只枚举权威
 /// Activity 根目录，查询、按 ID 读取与实时跟随共享同一套序列化约定。
 /// </summary>
-public sealed class FileActivityStore : IActivitySink, IActivityQuery, IActivityStream
+public sealed class FileActivityStore : IActivitySink, IActivityQuery, IActivityDiagnosticsQuery, IActivityStream
 {
     /// <summary>WatchAsync 未提供有效间隔时使用的默认轮询间隔。</summary>
     public const int DefaultPollIntervalMilliseconds = 1000;
@@ -59,6 +60,13 @@ public sealed class FileActivityStore : IActivitySink, IActivityQuery, IActivity
             throw new ArgumentException("StartedAt 必须是有效的开始时间。", nameof(record));
         }
 
+        // AtomicFile 会补建父目录；若绑定项目根不存在，直接拒绝写入，
+        // 防止审计动作创建一个并不存在的项目目录。
+        if (!Directory.Exists(_projectPath))
+        {
+            throw new DirectoryNotFoundException("项目目录不存在，无法写入 Activity：" + _projectPath);
+        }
+
         Normalize(record);
 
         var path = ActivityPaths.GetActivityFilePath(_projectPath, record.ActivityId, record.StartedAt);
@@ -77,14 +85,14 @@ public sealed class FileActivityStore : IActivitySink, IActivityQuery, IActivity
     /// 与 <see cref="QueryAsync"/> 相同，但额外返回无法解析的文件清单，
     /// 便于诊断数据损坏而不必把异常抛给调用方。
     /// </summary>
-    public async Task<ActivityQueryResult> QueryWithDiagnosticsAsync(
+    public async Task<ActivityQueryDiagnosticsResult> QueryWithDiagnosticsAsync(
         ActivityQuery query,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
 
         var records = new List<ActivityRecord>();
-        var failures = new List<ActivityReadFailure>();
+        var failures = new List<ActivityFileFailure>();
 
         foreach (var filePath in EnumerateActivityFiles())
         {
@@ -95,7 +103,7 @@ public sealed class FileActivityStore : IActivitySink, IActivityQuery, IActivity
             }
             catch (Exception exception) when (IsReadFailure(exception))
             {
-                failures.Add(new ActivityReadFailure(
+                failures.Add(new ActivityFileFailure(
                     filePath,
                     exception.GetType().Name + ": " + exception.Message));
             }
@@ -110,7 +118,7 @@ public sealed class FileActivityStore : IActivitySink, IActivityQuery, IActivity
             .Select(ToSummary)
             .ToArray();
 
-        return new ActivityQueryResult(summaries, failures);
+        return new ActivityQueryDiagnosticsResult(summaries, failures);
     }
 
     /// <summary>
@@ -375,10 +383,14 @@ public sealed class FileActivityStore : IActivitySink, IActivityQuery, IActivity
         string.IsNullOrWhiteSpace(filter)
         || string.Equals(filter, value, StringComparison.OrdinalIgnoreCase);
 
+    // 输入/输出大内容转存后只挂在载荷上，不在顶层 Artifacts 列表里；
+    // 若不计入，HasArtifactsOnly 查询会漏掉这类 Activity。
     private static bool HasArtifacts(ActivityRecord record) =>
         record.Artifacts.Count > 0
         || record.StdoutArtifact is not null
-        || record.StderrArtifact is not null;
+        || record.StderrArtifact is not null
+        || record.Input?.Artifact is not null
+        || record.Output?.Artifact is not null;
 
     private static ActivitySummary ToSummary(ActivityRecord record) =>
         new()

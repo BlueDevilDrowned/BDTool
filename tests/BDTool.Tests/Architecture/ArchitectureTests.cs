@@ -3,6 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using BDTool.Contracts.Errors;
+using BDTool.Contracts.Operations;
+using BDTool.Contracts.Projects;
+using BDTool.Contracts.Providers;
+using BDTool.Contracts.Workspace;
 using BDTool.Tests.Support;
 
 namespace BDTool.Tests.Architecture;
@@ -45,12 +50,60 @@ public sealed class ArchitectureTests
     [Fact]
     public void Application_And_Cli_DoNotDependOnProvider()
     {
-        foreach (var projectName in new[] { "BDTool.Application", "BDTool.Cli", "BDTool.Composition" })
+        foreach (var projectName in new[] { "BDTool.Application", "BDTool.Cli" })
         {
-            var references = GetReferences(projectName);
+            AssertNoProviderReference(projectName);
+        }
+    }
+
+    [Fact]
+    public void Composition_IsTheOnlyApplicationSideProviderAssembly()
+    {
+        var sourceRoot = Path.Combine(RepoPaths.Root, "src");
+        foreach (var projectFile in Directory.EnumerateFiles(sourceRoot, "BDTool.*.csproj", SearchOption.AllDirectories))
+        {
+            var projectName = Path.GetFileNameWithoutExtension(projectFile);
+            if (projectName == "BDTool.Composition" || projectName.StartsWith("BDTool.Provider.", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            AssertNoProviderReference(projectName);
+        }
+    }
+
+    [Fact]
+    public void LocalProvider_IsRestrictedToContractsAndCore()
+    {
+        var projectFile = Path.Combine(
+            RepoPaths.Root,
+            "src",
+            "BDTool.Provider.Local",
+            "BDTool.Provider.Local.csproj");
+        Assert.True(File.Exists(projectFile), "M1 必须包含 BDTool.Provider.Local 项目。");
+
+        var references = GetProjectReferences(XDocument.Load(projectFile));
+        Assert.Equal(
+            new[] { "BDTool.Contracts", "BDTool.Core" },
+            references.OrderBy(x => x));
+
+        var solution = File.ReadAllText(Path.Combine(RepoPaths.Root, "BDTool.sln"));
+        Assert.Contains("BDTool.Provider.Local.csproj", solution, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProviderProjects_DoNotReferenceApplicationOrOtherProviders()
+    {
+        var sourceRoot = Path.Combine(RepoPaths.Root, "src");
+        foreach (var projectFile in Directory.EnumerateFiles(sourceRoot, "BDTool.Provider.*.csproj", SearchOption.AllDirectories))
+        {
+            var projectName = Path.GetFileNameWithoutExtension(projectFile);
+            var references = GetProjectReferences(XDocument.Load(projectFile));
+
+            Assert.DoesNotContain("BDTool.Application", references);
             Assert.DoesNotContain(
                 references,
-                name => name.Contains("Provider", StringComparison.OrdinalIgnoreCase));
+                name => name.StartsWith("BDTool.Provider.", StringComparison.Ordinal) && name != projectName);
         }
     }
 
@@ -83,6 +136,7 @@ public sealed class ArchitectureTests
         var forbidden = new[]
         {
             "System.Text.Json",
+            "System.IO",
             "System.Net.Http",
             "System.Net.WebSockets",
             "System.Net.Sockets",
@@ -129,7 +183,54 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
-    public void SolutionContainsExactlyTheEightM0Projects()
+    public void Contracts_M1WorkspaceAndOperationExtensionsAreFrozen()
+    {
+        Assert.Equal("workspace.read", CapabilityIds.WorkspaceRead);
+        Assert.Equal("workspace.write", CapabilityIds.WorkspaceWrite);
+        Assert.Equal("workspace.search", CapabilityIds.WorkspaceSearch);
+        Assert.Equal("workspace.fingerprint", CapabilityIds.WorkspaceFingerprint);
+        Assert.Equal("editor.status", CapabilityIds.EditorStatus);
+        Assert.Equal("PRECONDITION_FAILED", ErrorCodes.PreconditionFailed);
+
+        var read = new WorkspaceReadResult();
+        var search = new WorkspaceSearchResult();
+        var fingerprint = new WorkspaceFileFingerprint();
+        var change = new WorkspaceChangeResult();
+
+        Assert.Equal(0, read.Length);
+        Assert.Equal(0, search.SkippedBinary);
+        Assert.Equal(0, search.SkippedTooLarge);
+        Assert.Equal(0, search.SkippedSymlink);
+        Assert.False(fingerprint.Exists);
+        Assert.False(change.Created);
+        Assert.False(change.DryRun);
+    }
+
+    [Fact]
+    public void Contracts_M1OperationViewsAndOfflineContextRemainTyped()
+    {
+        var list = new OperationsListData();
+        list.Operations.Add(new OperationSummary());
+        var describe = new OperationsDescribeData();
+        var detail = new OperationDetail
+        {
+            Id = "workspace.read",
+            InputSchemaJson = "{}",
+            ResultSchemaJson = "{}"
+        };
+        describe.Operation = detail;
+
+        Assert.Single(list.Operations);
+        Assert.Same(detail, describe.Operation);
+        Assert.Equal("{}", describe.Operation.InputSchemaJson);
+
+        var context = new ProjectContextData();
+        Assert.False(context.Editor.Connected);
+        Assert.Equal("not-connected", context.Editor.Status);
+    }
+
+    [Fact]
+    public void SolutionContainsM1BaselineProjects()
     {
         var solution = File.ReadAllText(Path.Combine(RepoPaths.Root, "BDTool.sln"));
         var expected = new[]
@@ -141,6 +242,7 @@ public sealed class ArchitectureTests
             "BDTool.Application",
             "BDTool.Composition",
             "BDTool.Cli",
+            "BDTool.Provider.Local",
             "BDTool.Tests"
         };
 
@@ -150,6 +252,14 @@ public sealed class ArchitectureTests
         }
 
         Assert.False(File.Exists(Path.Combine(RepoPaths.Root, "BDTool.slnx")));
+    }
+
+    private static void AssertNoProviderReference(string projectName)
+    {
+        var references = GetReferences(projectName);
+        Assert.DoesNotContain(
+            references,
+            name => name.Contains("Provider", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string[] GetReferences(string projectName)

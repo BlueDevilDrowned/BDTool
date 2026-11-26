@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BDTool.Contracts.Artifacts;
+using BDTool.Core.IO;
 using BDTool.Core.Projects;
 
 namespace BDTool.Activity;

@@ -14,7 +14,7 @@ namespace BDTool.Tests.Diagnostics;
 public sealed class DoctorHandlerTests
 {
     [Fact]
-    public async Task AllChecksPass_ReturnsCompletedReadyReportWithNoUnity()
+    public async Task WithoutProviders_ReturnsDegradedReportWithNoUnity()
     {
         var handler = CreateHandler(FullyWritableSnapshot());
 
@@ -22,7 +22,8 @@ public sealed class DoctorHandlerTests
 
         var typed = Assert.IsType<OperationResult<DoctorReport>>(result);
         Assert.Equal(OperationStatus.Completed, typed.Status);
-        Assert.Equal(DoctorStates.Ready, typed.Data.State);
+        Assert.Equal(DoctorStates.Degraded, typed.Data.State);
+        Assert.Equal("M1", typed.Data.Milestone);
         Assert.Empty(typed.Data.Providers);
         Assert.False(typed.Data.Unity.Connected);
         Assert.Equal("not-implemented", typed.Data.Unity.Integration);
@@ -31,11 +32,15 @@ public sealed class DoctorHandlerTests
         var unity = Assert.Single(typed.Data.Checks, check => check.Id == "unity.connection");
         Assert.Equal(DoctorCheckStatuses.Skipped, unity.Status);
 
-        foreach (var id in new[] { "app.version", "contract.version", "project.path", "state.root", "activity.root", "catalog.loaded", "providers.empty" })
+        foreach (var id in new[] { "app.version", "contract.version", "project.path", "state.root", "activity.root", "catalog.loaded" })
         {
             var check = Assert.Single(typed.Data.Checks, item => item.Id == id);
             Assert.Equal(DoctorCheckStatuses.Pass, check.Status);
         }
+
+        // 没有 Provider 时 doctor 必须降级，不能把空快照报告成 ready。
+        var providers = Assert.Single(typed.Data.Checks, item => item.Id == "providers.available");
+        Assert.Equal(DoctorCheckStatuses.Warn, providers.Status);
     }
 
     [Fact]
@@ -87,12 +92,180 @@ public sealed class DoctorHandlerTests
     }
 
     [Fact]
-    public async Task NonEmptyProviders_ProduceWarnAndDegradedState()
+    public async Task LocalWorkspaceProvider_ReturnsReadyStateAndProviderCheckPasses()
     {
-        var providers = new List<ProviderDescriptor>
+        var typed = await RunWithProvidersAsync(ValidWorkspaceProvider());
+
+        Assert.Equal(OperationStatus.Completed, typed.Status);
+        Assert.Equal(DoctorStates.Ready, typed.Data.State);
+        Assert.Empty(typed.Errors);
+        var provider = Assert.Single(typed.Data.Providers);
+        Assert.Equal("local", provider.Id);
+
+        var check = Assert.Single(typed.Data.Checks, item => item.Id == "providers.available");
+        Assert.Equal(DoctorCheckStatuses.Pass, check.Status);
+        Assert.Contains("provider[0]", check.Detail, StringComparison.Ordinal);
+        Assert.Contains("contract=" + BDToolContract.Version, check.Detail, StringComparison.Ordinal);
+        Assert.Contains("workspace.fingerprint=true", check.Detail, StringComparison.Ordinal);
+
+        // Provider 通过不等于 Unity 可用：M1 必须保持 skipped 且 connected=false。
+        Assert.False(typed.Data.Unity.Connected);
+        var unity = Assert.Single(typed.Data.Checks, item => item.Id == "unity.connection");
+        Assert.Equal(DoctorCheckStatuses.Skipped, unity.Status);
+    }
+
+    [Fact]
+    public async Task ProviderWithEmptyId_FailsWithProviderIdEmptyReason()
+    {
+        var provider = ValidWorkspaceProvider();
+        provider.Id = string.Empty;
+
+        var typed = await RunWithProvidersAsync(provider);
+
+        var check = AssertProviderFailure(typed, "PROVIDER_ID_EMPTY");
+        Assert.Contains("id=;", check.Detail, StringComparison.Ordinal);
+        var error = Assert.Single(typed.Errors);
+        Assert.Equal("0", error.Details["providerIndex"]);
+        Assert.Equal(BDToolContract.Version, error.Details["expectedContractVersion"]);
+    }
+
+    [Fact]
+    public async Task ProviderWithUnknownKind_FailsWithKindInvalidReason()
+    {
+        var provider = ValidWorkspaceProvider();
+        provider.Kind = "editorr";
+
+        var typed = await RunWithProvidersAsync(provider);
+
+        var check = AssertProviderFailure(typed, "PROVIDER_KIND_INVALID");
+        Assert.Contains("kind=editorr", check.Detail, StringComparison.Ordinal);
+        Assert.Contains("kindValid=false", check.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProviderWithContractMismatch_FailsWithActualContractVersion()
+    {
+        var provider = ValidWorkspaceProvider();
+        provider.ContractVersion = "0.0.9";
+
+        var typed = await RunWithProvidersAsync(provider);
+
+        AssertProviderFailure(typed, "PROVIDER_CONTRACT_MISMATCH");
+        var error = Assert.Single(typed.Errors);
+        Assert.Equal(BDToolContract.Version, error.Details["expectedContractVersion"]);
+        Assert.Equal("0.0.9", error.Details["actualContractVersion"]);
+    }
+
+    [Fact]
+    public async Task ProviderWithEmptyImplementationVersion_FailsWithStableReason()
+    {
+        var provider = ValidWorkspaceProvider();
+        provider.ImplementationVersion = " ";
+
+        var typed = await RunWithProvidersAsync(provider);
+
+        AssertProviderFailure(typed, "PROVIDER_IMPLEMENTATION_VERSION_EMPTY");
+    }
+
+    [Fact]
+    public async Task ProviderMissingWorkspaceCapability_FailsAndReportsMissingCapability()
+    {
+        var provider = ValidWorkspaceProvider();
+        provider.Capabilities.Remove(CapabilityIds.WorkspaceSearch);
+
+        var typed = await RunWithProvidersAsync(provider);
+
+        var check = AssertProviderFailure(typed, "PROVIDER_CAPABILITIES_MISSING");
+        Assert.Contains("workspace.search=false", check.Detail, StringComparison.Ordinal);
+        Assert.Contains("missing=workspace.search", check.Detail, StringComparison.Ordinal);
+        var error = Assert.Single(typed.Errors);
+        Assert.Equal("workspace.search", error.Details["missingCapabilities"]);
+    }
+
+    [Fact]
+    public async Task ProviderWithNullCapabilities_FailsForAllFourCapabilities()
+    {
+        var provider = ValidWorkspaceProvider();
+        provider.Capabilities = null!;
+
+        var typed = await RunWithProvidersAsync(provider);
+
+        var check = AssertProviderFailure(typed, "PROVIDER_CAPABILITIES_MISSING");
+        Assert.Contains("capabilities=<null>", check.Detail, StringComparison.Ordinal);
+        var error = Assert.Single(typed.Errors);
+        Assert.Equal(
+            "workspace.read,workspace.write,workspace.search,workspace.fingerprint",
+            error.Details["missingCapabilities"]);
+    }
+
+    [Fact]
+    public async Task ProviderWithEmptyDisplayName_DegradesInsteadOfFailing()
+    {
+        var provider = ValidWorkspaceProvider();
+        provider.DisplayName = string.Empty;
+
+        var typed = await RunWithProvidersAsync(provider);
+
+        // 展示名不影响能力判断，但描述不完整必须可见，因此降级而不是 ready/failed。
+        Assert.Equal(OperationStatus.Completed, typed.Status);
+        Assert.Equal(DoctorStates.Degraded, typed.Data.State);
+        Assert.Empty(typed.Errors);
+        var check = Assert.Single(typed.Data.Checks, item => item.Id == "providers.available");
+        Assert.Equal(DoctorCheckStatuses.Warn, check.Status);
+        Assert.Contains("PROVIDER_DISPLAY_NAME_EMPTY", check.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditorOnlyProvider_FailsBecauseWorkspaceProviderIsMissing()
+    {
+        var editor = new ProviderDescriptor
         {
-            new ProviderDescriptor { Id = "test-provider", Kind = ProviderKinds.Workspace }
+            Id = "editor",
+            DisplayName = "Editor",
+            Kind = ProviderKinds.Editor,
+            ContractVersion = BDToolContract.Version,
+            ImplementationVersion = "0.1.0"
         };
+
+        var typed = await RunWithProvidersAsync(editor);
+
+        var check = AssertProviderFailure(typed, "PROVIDER_WORKSPACE_MISSING");
+        Assert.Contains("workspaceProvider=none", check.Detail, StringComparison.Ordinal);
+        var error = Assert.Single(typed.Errors);
+        Assert.Equal("-1", error.Details["providerIndex"]);
+    }
+
+    [Fact]
+    public async Task DuplicateProviderIds_FailInsteadOfSilentlyOverwriting()
+    {
+        var typed = await RunWithProvidersAsync(ValidWorkspaceProvider(), ValidWorkspaceProvider());
+
+        AssertProviderFailure(typed, "PROVIDER_ID_DUPLICATE");
+        var error = Assert.Single(typed.Errors);
+        Assert.Equal("1", error.Details["providerIndex"]);
+        Assert.Equal("2", error.Details["providerCount"]);
+    }
+
+    /// <summary>统一断言 Provider 检查失败：结果 Failed、报告 not-ready、错误码与原因稳定。</summary>
+    private static DoctorCheck AssertProviderFailure(OperationResult<DoctorReport> typed, string reason)
+    {
+        Assert.Equal(OperationStatus.Failed, typed.Status);
+        Assert.Equal(DoctorStates.NotReady, typed.Data.State);
+
+        var check = Assert.Single(typed.Data.Checks, item => item.Id == "providers.available");
+        Assert.Equal(DoctorCheckStatuses.Fail, check.Status);
+        Assert.Contains(reason, check.Detail, StringComparison.Ordinal);
+
+        var error = Assert.Single(typed.Errors);
+        Assert.Equal(ErrorCodes.EnvironmentUnsupported, error.Code);
+        Assert.Equal("providers.available", error.Details["checkId"]);
+        Assert.Equal(reason, error.Details["reason"]);
+        return check;
+    }
+
+    private static async Task<OperationResult<DoctorReport>> RunWithProvidersAsync(
+        params ProviderDescriptor[] providers)
+    {
         var handler = new DoctorHandler(
             new FakeProbe(FullyWritableSnapshot()),
             CatalogWithDoctor(),
@@ -100,14 +273,24 @@ public sealed class DoctorHandlerTests
             providers: providers);
 
         var result = await handler.ExecuteAsync(Request(), StubContext.Instance, CancellationToken.None);
-
-        var typed = Assert.IsType<OperationResult<DoctorReport>>(result);
-        Assert.Equal(OperationStatus.Completed, typed.Status);
-        Assert.Equal(DoctorStates.Degraded, typed.Data.State);
-        Assert.Single(typed.Data.Providers);
-        var check = Assert.Single(typed.Data.Checks, item => item.Id == "providers.empty");
-        Assert.Equal(DoctorCheckStatuses.Warn, check.Status);
+        return Assert.IsType<OperationResult<DoctorReport>>(result);
     }
+
+    private static ProviderDescriptor ValidWorkspaceProvider() => new ProviderDescriptor
+    {
+        Id = "local",
+        DisplayName = "Local Workspace",
+        Kind = ProviderKinds.Workspace,
+        ContractVersion = BDToolContract.Version,
+        ImplementationVersion = "0.1.0",
+        Capabilities = new Dictionary<string, bool>(StringComparer.Ordinal)
+        {
+            [CapabilityIds.WorkspaceRead] = true,
+            [CapabilityIds.WorkspaceWrite] = true,
+            [CapabilityIds.WorkspaceSearch] = true,
+            [CapabilityIds.WorkspaceFingerprint] = true
+        }
+    };
 
     private static DoctorHandler CreateHandler(DoctorEnvironmentSnapshot snapshot) =>
         new DoctorHandler(new FakeProbe(snapshot), CatalogWithDoctor(), "0.1.0", @"C:\project");

@@ -13,7 +13,7 @@ public static class DoctorCheckStatuses
     public const string Warn = "warn";
     public const string Fail = "fail";
 
-    /// <summary>按设计明确跳过，不视为失败；例如 M0 不连接 Unity。</summary>
+    /// <summary>按设计明确跳过，不视为失败；例如 M1 不连接 Unity。</summary>
     public const string Skipped = "skipped";
 }
 
@@ -26,7 +26,7 @@ public static class DoctorStates
 }
 
 /// <summary>
-/// M0 doctor 的 typed 结果。只描述应用自身、项目目录与存储环境；
+/// M1 doctor 的 typed 结果。描述应用自身、项目目录、存储环境与 Provider 快照；
 /// Unity 连接状态固定为未连接，禁止据此推断任何 Unity 兼容性。
 /// </summary>
 public sealed class DoctorReport
@@ -41,7 +41,7 @@ public sealed class DoctorReport
     public string ActivityRoot { get; set; } = string.Empty;
     public List<DoctorCheck> Checks { get; set; } = new List<DoctorCheck>();
 
-    /// <summary>M0 没有装配任何 Provider，必须保持为空列表。</summary>
+    /// <summary>当前真实装配的 Provider 快照；M1 预期包含 local Workspace Provider。</summary>
     public List<ProviderDescriptor> Providers { get; set; } = new List<ProviderDescriptor>();
 
     public UnityConnectionReport Unity { get; set; } = new UnityConnectionReport();
@@ -58,12 +58,12 @@ public sealed class DoctorCheck
 }
 
 /// <summary>
-/// Unity 连接报告。M0 固定 Connected=false；Editor Provider 属于 M2，
+/// Unity 连接报告。M1 固定 Connected=false；Editor Provider 属于后续里程碑，
 /// 任何“可用”声明都必须等真实项目与 Editor 验证。
 /// </summary>
 public sealed class UnityConnectionReport
 {
     public bool Connected { get; set; }
     public string Integration { get; set; } = "not-implemented";
-    public string Detail { get; set; } = "M0 不连接 Unity；Editor Provider 尚未实现。";
+    public string Detail { get; set; } = "M1 不连接 Unity；Editor Provider 尚未实现。";
 }

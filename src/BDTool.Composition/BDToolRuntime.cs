@@ -30,7 +30,7 @@ public sealed class BDToolRuntime
     /// <summary>冻结的操作目录快照。</summary>
     public IOperationCatalog Catalog { get; }
 
-    /// <summary>当前构建注册的 Handler；M0 仅注册 system.doctor。</summary>
+    /// <summary>当前构建注册的 M1 Handler 集合。</summary>
     public IOperationHandlerRegistry Handlers { get; }
 
     /// <summary>表现层唯一执行入口。</summary>

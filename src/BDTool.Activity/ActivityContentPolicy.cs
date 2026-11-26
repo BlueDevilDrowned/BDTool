@@ -28,6 +28,21 @@ public sealed class ActivityPayloadSummary
 
     /// <summary>原始 UTF-8 字节数。</summary>
     public long OriginalBytes { get; init; }
+
+    /// <summary>
+    /// 需要写入 Artifact 的脱敏后内容；未触发大内容阈值时为空字符串。
+    /// JSON 载荷会先剔除敏感字段原值，因此落盘内容与预览口径一致，不绕开 Activity 脱敏。
+    /// </summary>
+    public string ArtifactContent { get; init; } = string.Empty;
+
+    /// <summary>Artifact 内容类型：JSON 载荷为 application/json，其余为 text/plain。</summary>
+    public string ArtifactContentType { get; init; } = "application/json";
+
+    /// <summary>实际写入 Artifact 的脱敏内容 UTF-8 字节数，用于核对落盘大小。</summary>
+    public long ArtifactBytes { get; init; }
+
+    /// <summary>实际写入 Artifact 的脱敏内容 SHA-256（小写十六进制）。</summary>
+    public string ArtifactSha256 { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -53,20 +68,28 @@ public static class ActivityContentPolicy
 
         if (artifactRequired)
         {
-            // 大内容不内联，只保留足以核对的摘要信息。
+            // 大内容不内联；Artifact 保存脱敏后的内容，摘要中的大小和哈希必须
+            // 对应实际落盘字节，否则调用方无法用摘要验证 Artifact。
+            var artifactBytes = Encoding.UTF8.GetByteCount(normalized);
+            var artifactSha256 = ComputeSha256(normalized);
             var summary = new Dictionary<string, object?>
             {
                 ["$artifact"] = "required",
                 ["kind"] = payloadKind,
-                ["bytes"] = bytes,
-                ["sha256"] = ComputeSha256(text)
+                ["bytes"] = artifactBytes,
+                ["sha256"] = artifactSha256,
+                ["originalBytes"] = bytes
             };
             return new ActivityPayloadSummary
             {
                 PreviewJson = JsonSerializer.Serialize(summary),
                 Redacted = redacted,
                 ArtifactRequired = true,
-                OriginalBytes = bytes
+                OriginalBytes = bytes,
+                ArtifactContent = normalized,
+                ArtifactContentType = redactedNode is null ? "text/plain" : "application/json",
+                ArtifactBytes = artifactBytes,
+                ArtifactSha256 = artifactSha256
             };
         }
 

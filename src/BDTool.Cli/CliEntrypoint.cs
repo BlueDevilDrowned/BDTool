@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BDTool.Application;
@@ -17,15 +18,16 @@ using BDTool.Operations.Catalog;
 namespace BDTool.Cli;
 
 /// <summary>
-/// 可测试的 CLI 入口。参数解析、组合、执行与退出码映射都在这里，
-/// Main 只负责把控制台流传进来，方便测试直接调用而不启动子进程。
+/// 可测试 CLI 入口。默认输出 JSON；--human 切换人类展示。所有实际操作都经
+/// IApplicationGateway，因此 operations/context/workspace 路由共享能力检查与 Activity 审计。
 /// </summary>
 public static class CliEntrypoint
 {
-    /// <summary>activity list 未显式指定数量时的返回上限。</summary>
     private const int DefaultActivityListLimit = 100;
 
-    /// <summary>运行一次 CLI 调用并返回稳定退出码。</summary>
+    /// <summary>Activity 文件无法解析时向调用方暴露的稳定告警码。</summary>
+    private const string ActivityFileUnreadable = "ACTIVITY_FILE_UNREADABLE";
+
     public static async Task<int> RunAsync(
         string[] args,
         TextWriter stdout,
@@ -36,10 +38,47 @@ public static class CliEntrypoint
         ArgumentNullException.ThrowIfNull(stdout);
         ArgumentNullException.ThrowIfNull(stderr);
 
+        try
+        {
+            return await RunCoreAsync(args, stdout, stderr, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            var cancelled = Failure(ErrorCodes.Cancelled, "cli", "调用已取消。", OperationStatus.Cancelled);
+            WriteResult(cancelled, new CliOptions(), stdout, stderr);
+            return (int)ExitCodePolicy.Map(cancelled);
+        }
+        catch (Exception exception)
+        {
+            // 非法初始化路径、组合根异常等不得让进程带裸异常退出：
+            // stdout 必须仍是一个合法统一信封，参数类异常映射为 INVALID_ARGUMENT。
+            var invalidArgument = exception is ArgumentException;
+            var failed = Failure(
+                invalidArgument ? ErrorCodes.InvalidArgument : ErrorCodes.InternalError,
+                "cli",
+                "CLI 执行失败：" + exception.Message,
+                OperationStatus.Failed,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["exceptionType"] = exception.GetType().Name
+                });
+            WriteResult(failed, new CliOptions(), stdout, stderr);
+            return (int)ExitCodePolicy.Map(failed);
+        }
+    }
+
+    /// <summary>命令分发主体；异常统一由 <see cref="RunAsync"/> 边界转换为 JSON 信封。</summary>
+    private static async Task<int> RunCoreAsync(
+        string[] args,
+        TextWriter stdout,
+        TextWriter stderr,
+        CancellationToken cancellationToken)
+    {
+
         if (args.Length == 0)
         {
             WriteUsage(stderr);
-            return (int)CliExitCode.InvalidArgument;
+            return WriteInvalidArgument("缺少命令。", new CliOptions(), stdout, stderr);
         }
 
         var command = args[0];
@@ -62,26 +101,268 @@ public static class CliEntrypoint
             return await RunActivityCommandAsync(args, stdout, stderr, cancellationToken).ConfigureAwait(false);
         }
 
-        if (command.StartsWith('-'))
+        if (string.Equals(command, "operations", StringComparison.Ordinal))
         {
-            stderr.WriteLine($"bdtool: 未知选项 {command}");
-            WriteUsage(stderr);
-            return (int)CliExitCode.InvalidArgument;
+            return await RunOperationsCommandAsync(args, stdout, stderr, cancellationToken).ConfigureAwait(false);
         }
 
-        var parse = ParseOptions(args, 1, allowOperationOptions: true);
+        if (string.Equals(command, "run", StringComparison.Ordinal))
+        {
+            if (args.Length <= 1 || args[1].StartsWith('-'))
+            {
+                return WriteInvalidArgument("run 需要一个 operationId。", new CliOptions(), stdout, stderr);
+            }
+
+            return await RunParsedOperationAsync(
+                ResolveOperationId(args[1]),
+                args,
+                optionStart: 2,
+                allowInput: true,
+                stdout,
+                stderr,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (string.Equals(command, "doctor", StringComparison.Ordinal)
+            || string.Equals(command, "context", StringComparison.Ordinal))
+        {
+            return await RunParsedOperationAsync(
+                ResolveOperationId(command),
+                args,
+                optionStart: 1,
+                allowInput: false,
+                stdout,
+                stderr,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (command.StartsWith('-'))
+        {
+            return WriteInvalidArgument($"未知选项 {command}。", new CliOptions(), stdout, stderr);
+        }
+
+        // 兼容入口：bdtool <operationId> 直接执行目录操作。
+        return await RunParsedOperationAsync(
+            ResolveOperationId(command),
+            args,
+            optionStart: 1,
+            allowInput: true,
+            stdout,
+            stderr,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>operations list/describe 必须进入 Gateway，不能由解析器直接读取目录。</summary>
+    private static async Task<int> RunOperationsCommandAsync(
+        string[] args,
+        TextWriter stdout,
+        TextWriter stderr,
+        CancellationToken cancellationToken)
+    {
+        var subcommand = args.Length > 1 ? args[1] : string.Empty;
+        if (string.Equals(subcommand, "list", StringComparison.Ordinal))
+        {
+            return await RunParsedOperationAsync(
+                "operations.list",
+                args,
+                optionStart: 2,
+                allowInput: false,
+                stdout,
+                stderr,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (string.Equals(subcommand, "describe", StringComparison.Ordinal))
+        {
+            if (args.Length <= 2 || args[2].StartsWith('-'))
+            {
+                return WriteInvalidArgument("operations describe 需要一个 operationId。", new CliOptions(), stdout, stderr);
+            }
+
+            var parse = CliOptionParser.Parse(args, 3, allowOperationOptions: false);
+            if (parse.Error is not null)
+            {
+                var mode = InferOutputMode(args);
+                return WriteInvalidArgument(parse.Error, mode, stdout, stderr);
+            }
+
+            var inputJson = JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["operationId"] = args[2]
+            });
+            return await ExecuteAsync(
+                "operations.describe",
+                inputJson,
+                parse.Options!,
+                stdout,
+                stderr,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return WriteInvalidArgument("operations 需要 list 或 describe 子命令。", new CliOptions(), stdout, stderr);
+    }
+
+    /// <summary>activity 是 CLI 查询路由，不映射到业务操作，也不写新的 Activity。</summary>
+    private static async Task<int> RunActivityCommandAsync(
+        string[] args,
+        TextWriter stdout,
+        TextWriter stderr,
+        CancellationToken cancellationToken)
+    {
+        var subcommand = args.Length > 1 ? args[1] : string.Empty;
+        if (!string.Equals(subcommand, "list", StringComparison.Ordinal)
+            && !string.Equals(subcommand, "show", StringComparison.Ordinal))
+        {
+            return WriteInvalidArgument("activity 需要 list 或 show 子命令。", new CliOptions(), stdout, stderr);
+        }
+
+        string? activityId = null;
+        var optionStart = 2;
+        if (string.Equals(subcommand, "show", StringComparison.Ordinal))
+        {
+            if (args.Length <= 2 || args[2].StartsWith('-'))
+            {
+                return WriteInvalidArgument("activity show 需要一个 activityId。", new CliOptions(), stdout, stderr);
+            }
+
+            activityId = args[2];
+            optionStart = 3;
+        }
+
+        var parse = CliOptionParser.Parse(args, optionStart, allowOperationOptions: false);
         if (parse.Error is not null)
         {
-            stderr.WriteLine($"bdtool: {parse.Error}");
-            return (int)CliExitCode.InvalidArgument;
+            return WriteInvalidArgument(parse.Error, InferOutputMode(args), stdout, stderr);
         }
 
         var options = parse.Options!;
-        var operationId = ResolveOperationId(command);
         var runtimeResult = TryCreateRuntime(options);
         if (runtimeResult.Failure is not null)
         {
-            WriteResult(runtimeResult.Failure, options.Json, stdout, stderr);
+            WriteResult(runtimeResult.Failure, options, stdout, stderr);
+            return (int)ExitCodePolicy.Map(runtimeResult.Failure);
+        }
+
+        var runtime = runtimeResult.Runtime!;
+        try
+        {
+            if (string.Equals(subcommand, "list", StringComparison.Ordinal))
+            {
+                var query = new ActivityQuery { Limit = DefaultActivityListLimit };
+                ActivityQueryDiagnosticsResult diagnostics;
+                if (runtime.ActivityQuery is IActivityDiagnosticsQuery diagnosticsQuery)
+                {
+                    diagnostics = await diagnosticsQuery
+                        .QueryWithDiagnosticsAsync(query, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    // 基础端口仍可用：没有诊断能力时退化为普通列表，不伪造诊断结果。
+                    diagnostics = new ActivityQueryDiagnosticsResult(
+                        await runtime.ActivityQuery.QueryAsync(query, cancellationToken).ConfigureAwait(false),
+                        Array.Empty<ActivityFileFailure>());
+                }
+
+                WriteActivityList(diagnostics, options, stdout, stderr);
+                return (int)CliExitCode.Success;
+            }
+
+            var record = await runtime.ActivityQuery
+                .GetAsync(activityId!, cancellationToken)
+                .ConfigureAwait(false);
+            WriteActivityRecord(record, options, stdout);
+            return (int)CliExitCode.Success;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            var cancelled = Failure(ErrorCodes.Cancelled, "activity", "查询已取消。", OperationStatus.Cancelled);
+            WriteResult(cancelled, options, stdout, stderr);
+            return (int)ExitCodePolicy.Map(cancelled);
+        }
+        catch (FileNotFoundException)
+        {
+            var missing = Failure(
+                ErrorCodes.NotFound,
+                "activity",
+                "找不到 Activity：" + activityId + "。",
+                OperationStatus.Failed,
+                new Dictionary<string, string> { ["activityId"] = activityId ?? string.Empty });
+            WriteResult(missing, options, stdout, stderr);
+            return (int)ExitCodePolicy.Map(missing);
+        }
+        catch (ArgumentException exception)
+        {
+            var invalid = Failure(ErrorCodes.InvalidArgument, "activity", exception.Message);
+            WriteResult(invalid, options, stdout, stderr);
+            return (int)ExitCodePolicy.Map(invalid);
+        }
+        catch (Exception exception)
+        {
+            var failed = Failure(
+                ErrorCodes.ExecutionFailed,
+                "activity",
+                "Activity 查询失败。",
+                OperationStatus.Failed,
+                new Dictionary<string, string> { ["exceptionType"] = exception.GetType().Name });
+            WriteResult(failed, options, stdout, stderr);
+            return (int)ExitCodePolicy.Map(failed);
+        }
+    }
+
+    private static async Task<int> RunParsedOperationAsync(
+        string operationId,
+        string[] args,
+        int optionStart,
+        bool allowInput,
+        TextWriter stdout,
+        TextWriter stderr,
+        CancellationToken cancellationToken)
+    {
+        var parse = CliOptionParser.Parse(args, optionStart, allowInput);
+        if (parse.Error is not null)
+        {
+            return WriteInvalidArgument(parse.Error, InferOutputMode(args), stdout, stderr);
+        }
+
+        var options = parse.Options!;
+        string inputJson;
+        if (allowInput)
+        {
+            var loaded = CliInputLoader.Load(options);
+            if (loaded.Error is not null)
+            {
+                return WriteInvalidArgument(loaded.Error, options, stdout, stderr);
+            }
+
+            inputJson = loaded.Json!;
+        }
+        else
+        {
+            inputJson = "{}";
+        }
+
+        return await ExecuteAsync(
+            operationId,
+            inputJson,
+            options,
+            stdout,
+            stderr,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<int> ExecuteAsync(
+        string operationId,
+        string inputJson,
+        CliOptions options,
+        TextWriter stdout,
+        TextWriter stderr,
+        CancellationToken cancellationToken)
+    {
+        var runtimeResult = TryCreateRuntime(options);
+        if (runtimeResult.Failure is not null)
+        {
+            WriteResult(runtimeResult.Failure, options, stdout, stderr);
             return (int)ExitCodePolicy.Map(runtimeResult.Failure);
         }
 
@@ -91,7 +372,7 @@ public static class CliEntrypoint
         {
             OperationId = operationId,
             ProjectPath = runtime.ProjectPath,
-            InputJson = options.InputJson,
+            InputJson = inputJson,
             DryRun = options.DryRun
         };
         var activity = new ActivityContext
@@ -110,113 +391,10 @@ public static class CliEntrypoint
         var result = await runtime.Gateway
             .ExecuteAsync(request, activity, cancellationToken)
             .ConfigureAwait(false);
-        WriteResult(result, options.Json, stdout, stderr);
+        WriteResult(result, options, stdout, stderr);
         return (int)ExitCodePolicy.Map(result);
     }
 
-    /// <summary>
-    /// activity 命令是 CLI 专用查询路由，不映射到冻结目录中的操作 ID：
-    /// `activity list` 输出摘要列表，`activity show` 输出单条完整记录。
-    /// </summary>
-    private static async Task<int> RunActivityCommandAsync(
-        string[] args,
-        TextWriter stdout,
-        TextWriter stderr,
-        CancellationToken cancellationToken)
-    {
-        var subcommand = args.Length > 1 ? args[1] : string.Empty;
-        if (!string.Equals(subcommand, "list", StringComparison.Ordinal)
-            && !string.Equals(subcommand, "show", StringComparison.Ordinal))
-        {
-            stderr.WriteLine("bdtool: activity 需要 list 或 show 子命令。");
-            WriteUsage(stderr);
-            return (int)CliExitCode.InvalidArgument;
-        }
-
-        string? activityId = null;
-        var optionStart = 2;
-        if (string.Equals(subcommand, "show", StringComparison.Ordinal))
-        {
-            if (args.Length <= 2 || args[2].StartsWith('-'))
-            {
-                stderr.WriteLine("bdtool: activity show 需要一个 activityId。");
-                return (int)CliExitCode.InvalidArgument;
-            }
-
-            activityId = args[2];
-            optionStart = 3;
-        }
-
-        var parse = ParseOptions(args, optionStart, allowOperationOptions: false);
-        if (parse.Error is not null)
-        {
-            stderr.WriteLine($"bdtool: {parse.Error}");
-            return (int)CliExitCode.InvalidArgument;
-        }
-
-        var options = parse.Options!;
-        var runtimeResult = TryCreateRuntime(options);
-        if (runtimeResult.Failure is not null)
-        {
-            WriteResult(runtimeResult.Failure, options.Json, stdout, stderr);
-            return (int)ExitCodePolicy.Map(runtimeResult.Failure);
-        }
-
-        var runtime = runtimeResult.Runtime!;
-        try
-        {
-            if (string.Equals(subcommand, "list", StringComparison.Ordinal))
-            {
-                var summaries = await runtime.ActivityQuery
-                    .QueryAsync(new ActivityQuery { Limit = DefaultActivityListLimit }, cancellationToken)
-                    .ConfigureAwait(false);
-                WriteActivityList(summaries, options.Json, stdout);
-                return (int)CliExitCode.Success;
-            }
-
-            var record = await runtime.ActivityQuery
-                .GetAsync(activityId!, cancellationToken)
-                .ConfigureAwait(false);
-            WriteActivityRecord(record, options.Json, stdout);
-            return (int)CliExitCode.Success;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            var cancelled = Failure(ErrorCodes.Cancelled, "activity", "查询已取消。", OperationStatus.Cancelled);
-            WriteResult(cancelled, options.Json, stdout, stderr);
-            return (int)ExitCodePolicy.Map(cancelled);
-        }
-        catch (FileNotFoundException)
-        {
-            var missing = Failure(
-                ErrorCodes.NotFound,
-                "activity",
-                "找不到 Activity：" + activityId + "。",
-                OperationStatus.Failed,
-                new Dictionary<string, string> { ["activityId"] = activityId ?? string.Empty });
-            WriteResult(missing, options.Json, stdout, stderr);
-            return (int)ExitCodePolicy.Map(missing);
-        }
-        catch (ArgumentException exception)
-        {
-            var invalid = Failure(ErrorCodes.InvalidArgument, "activity", exception.Message);
-            WriteResult(invalid, options.Json, stdout, stderr);
-            return (int)ExitCodePolicy.Map(invalid);
-        }
-        catch (Exception exception)
-        {
-            var failed = Failure(
-                ErrorCodes.ExecutionFailed,
-                "activity",
-                "Activity 查询失败。",
-                OperationStatus.Failed,
-                new Dictionary<string, string> { ["exceptionType"] = exception.GetType().Name });
-            WriteResult(failed, options.Json, stdout, stderr);
-            return (int)ExitCodePolicy.Map(failed);
-        }
-    }
-
-    /// <summary>按选项创建运行时；目录或装配错误转换成协议结果而不是抛给进程。</summary>
     private static (BDToolRuntime? Runtime, OperationResult? Failure) TryCreateRuntime(CliOptions options)
     {
         try
@@ -234,24 +412,53 @@ public static class CliEntrypoint
         }
         catch (InvalidOperationException exception)
         {
-            // 组合一致性校验失败属于构建缺陷，但对 CLI 调用方仍应返回稳定协议错误。
             return (null, Failure(ErrorCodes.EnvironmentUnsupported, "composition", exception.Message));
+        }
+        catch (BDTool.Core.Workspace.WorkspaceException exception)
+        {
+            return (null, Failure(exception.Code, "composition", exception.Message));
         }
     }
 
     private static void WriteActivityList(
-        IReadOnlyList<ActivitySummary> summaries,
-        bool json,
-        TextWriter stdout)
+        ActivityQueryDiagnosticsResult diagnostics,
+        CliOptions options,
+        TextWriter stdout,
+        TextWriter stderr)
     {
-        if (json)
+        var summaries = diagnostics.Summaries;
+        var warnings = new List<KernelWarning>(diagnostics.UnreadableFiles.Count);
+        foreach (var failure in diagnostics.UnreadableFiles)
+        {
+            warnings.Add(new KernelWarning
+            {
+                Code = ActivityFileUnreadable,
+                Message = "Activity 文件无法解析，已跳过。",
+                Details = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["filePath"] = failure.FilePath,
+                    ["reason"] = failure.Reason
+                }
+            });
+        }
+
+        if (!options.Human)
         {
             stdout.WriteLine(CliOutput.Serialize(new ActivityListOutput
             {
                 Items = summaries.ToList(),
-                Count = summaries.Count
+                Count = summaries.Count,
+                UnreadableFiles = diagnostics.UnreadableFiles.ToList(),
+                Warnings = warnings
             }));
             return;
+        }
+
+        // 人类模式下诊断写 stderr，保持 stdout 只包含可读列表。
+        foreach (var warning in warnings)
+        {
+            stderr.WriteLine(
+                $"bdtool: warning {warning.Code} {warning.Details["filePath"]}: {warning.Details["reason"]}");
         }
 
         if (summaries.Count == 0)
@@ -268,9 +475,9 @@ public static class CliEntrypoint
         }
     }
 
-    private static void WriteActivityRecord(ActivityRecord record, bool json, TextWriter stdout)
+    private static void WriteActivityRecord(ActivityRecord record, CliOptions options, TextWriter stdout)
     {
-        if (json)
+        if (!options.Human)
         {
             stdout.WriteLine(CliOutput.Serialize(record));
             return;
@@ -290,24 +497,48 @@ public static class CliEntrypoint
         }
     }
 
-    private static void WriteResult(OperationResult result, bool json, TextWriter stdout, TextWriter stderr)
+    private static void WriteResult(OperationResult result, CliOptions options, TextWriter stdout, TextWriter stderr)
     {
-        if (json)
+        if (options.Human)
         {
+            CliHumanFormatter.WriteResult(result, stdout, stderr);
+            return;
+        }
+
+        stdout.WriteLine(CliOutput.SerializeResult(result));
+    }
+
+    private static int WriteInvalidArgument(
+        string message,
+        CliOptions options,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        var result = Failure(ErrorCodes.InvalidArgument, "cli", message);
+        stderr.WriteLine("bdtool: " + message);
+        if (options.Human)
+        {
+            CliHumanFormatter.WriteResult(result, stdout, stderr);
+        }
+        else
+        {
+            // 默认 JSON 模式下 stdout 必须仍是一个合法统一结果信封。
             stdout.WriteLine(CliOutput.SerializeResult(result));
-            return;
         }
 
-        if (result.Errors.Count == 0)
-        {
-            stdout.WriteLine($"bdtool: {result.Status}");
-            return;
-        }
+        return (int)CliExitCode.InvalidArgument;
+    }
 
-        foreach (var error in result.Errors)
+    /// <summary>解析失败前根据原始参数推断输出模式，避免 --human 场景被强制 JSON。</summary>
+    private static CliOptions InferOutputMode(string[] args)
+    {
+        var hasJson = args.Contains("--json", StringComparer.Ordinal);
+        var hasHuman = args.Contains("--human", StringComparer.Ordinal);
+        return new CliOptions
         {
-            stderr.WriteLine($"bdtool: {error.Code} ({error.Stage}) {error.Message}");
-        }
+            Json = !hasHuman || hasJson,
+            Human = hasHuman && !hasJson
+        };
     }
 
     private static OperationResult Failure(
@@ -333,10 +564,10 @@ public static class CliEntrypoint
 
     private static bool IsVersion(string command) => command is "--version" or "-v" or "version";
 
-    /// <summary>把用户友好的短命令映射到目录中的稳定操作 ID。</summary>
     private static string ResolveOperationId(string command) => command switch
     {
         "doctor" => "system.doctor",
+        "context" => "project.context",
         _ => command
     };
 
@@ -344,81 +575,20 @@ public static class CliEntrypoint
     {
         writer.WriteLine($"{BDToolIdentity.ExecutableName} {BDToolIdentity.Version}（{BDToolIdentity.ProductName} {BDToolIdentity.Milestone}）");
         writer.WriteLine();
-        writer.WriteLine("用法:");
-        writer.WriteLine("  bdtool doctor [--json] [--project <path>]");
-        writer.WriteLine("  bdtool activity list [--json] [--project <path>]");
-        writer.WriteLine("  bdtool activity show <activityId> [--json] [--project <path>]");
-        writer.WriteLine("  bdtool <operation> [--input <json>] [--json] [--dry-run] [--project <path>]");
+        writer.WriteLine("用法（默认 JSON；--human 切换人类输出）:");
+        writer.WriteLine("  bdtool doctor [--project <path>] [--human]");
+        writer.WriteLine("  bdtool context [--project <path>] [--human]");
+        writer.WriteLine("  bdtool operations list [--project <path>] [--human]");
+        writer.WriteLine("  bdtool operations describe <id> [--project <path>] [--human]");
+        writer.WriteLine("  bdtool run <id> [--input <file> | --input-json <json>] [--dry-run] [--project <path>] [--human]");
+        writer.WriteLine("  bdtool <id> [--input <file> | --input-json <json>] [--project <path>] [--human]");
+        writer.WriteLine("  bdtool activity list|show <activityId> [--project <path>] [--human]");
         writer.WriteLine("  bdtool --version | --help");
         writer.WriteLine();
-        writer.WriteLine("M0 限制:");
-        writer.WriteLine("  仅 system.doctor 已实现；其余目录操作返回 CAPABILITY_UNSUPPORTED（退出码 3）。");
-        writer.WriteLine("  不连接 Unity，Provider 列表为空。");
+        writer.WriteLine("M1 范围: 本地 Workspace read/search/fingerprint/apply；不连接 Unity。");
         writer.WriteLine();
         writer.WriteLine("退出码:");
-        writer.WriteLine("  0 成功  2 参数错误  3 能力不支持  4 环境未就绪  5 执行失败");
+        writer.WriteLine("  0 成功  2 参数/未找到  3 能力不支持  4 项目/环境未就绪  5 执行失败");
         writer.WriteLine("  6 超时  7 取消  8 结果不确定");
-    }
-
-    private static (CliOptions? Options, string? Error) ParseOptions(
-        string[] args,
-        int startIndex,
-        bool allowOperationOptions)
-    {
-        var options = new CliOptions();
-        for (var index = startIndex; index < args.Length; index++)
-        {
-            var argument = args[index];
-            switch (argument)
-            {
-                case "--json":
-                    options.Json = true;
-                    break;
-                case "--dry-run" when allowOperationOptions:
-                    options.DryRun = true;
-                    break;
-                case "--project":
-                    if (!TryReadValue(args, ref index, out var projectPath))
-                    {
-                        return (null, "--project 需要一个路径。");
-                    }
-
-                    options.ProjectPath = projectPath;
-                    break;
-                case "--input" when allowOperationOptions:
-                    if (!TryReadValue(args, ref index, out var inputJson))
-                    {
-                        return (null, "--input 需要一个 JSON 字符串。");
-                    }
-
-                    options.InputJson = inputJson;
-                    break;
-                default:
-                    return (null, $"未知选项 {argument}");
-            }
-        }
-
-        return (options, null);
-    }
-
-    private static bool TryReadValue(string[] args, ref int index, out string value)
-    {
-        value = string.Empty;
-        if (index + 1 >= args.Length)
-        {
-            return false;
-        }
-
-        value = args[++index];
-        return true;
-    }
-
-    private sealed class CliOptions
-    {
-        public bool Json { get; set; }
-        public bool DryRun { get; set; }
-        public string ProjectPath { get; set; } = string.Empty;
-        public string? CatalogPath { get; set; }
-        public string InputJson { get; set; } = "{}";
     }
 }

@@ -1,19 +1,54 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace BDTool.Activity;
+namespace BDTool.Core.IO;
 
 /// <summary>
-/// 同目录临时文件 + 原子重命名的写入工具。Activity 与 Artifact 都通过这里落盘，
-/// 保证任何时刻磁盘上看到的都是完整文件，不会出现写了一半的 JSON 或产物。
+/// 同目录临时文件加原子替换的共享写入实现。Activity、Artifact 与后续 Workspace 写操作
+/// 都使用这一份实现，避免不同模块在持久化细节上产生漂移。
 /// </summary>
-internal static class AtomicFile
+public static class AtomicFile
 {
+    private static readonly UTF8Encoding s_strictUtf8 = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+
+    /// <summary>以覆盖方式写入原始字节。</summary>
+    public static Task<bool> WriteAsync(
+        string destinationPath,
+        ReadOnlyMemory<byte> content,
+        CancellationToken cancellationToken)
+    {
+        return WriteAsync(destinationPath, content, overwrite: true, cancellationToken);
+    }
+
     /// <summary>
-    /// 把内容写入目标路径。overwrite=true 时整文件替换已有内容，
-    /// overwrite=false 时若目标已存在则返回 false（用于 artifact 的唯一命名）。
+    /// 以 UTF-8 无 BOM 写入文本。编码器拒绝孤立代理项，避免悄悄写入非法字节。
+    /// </summary>
+    public static Task<bool> WriteUtf8Async(
+        string destinationPath,
+        string content,
+        bool overwrite,
+        CancellationToken cancellationToken)
+    {
+        if (content == null)
+        {
+            throw new ArgumentNullException(nameof(content));
+        }
+
+        return WriteAsync(
+            destinationPath,
+            s_strictUtf8.GetBytes(content),
+            overwrite,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// 把内容写入目标路径。overwrite=true 时整文件替换已有内容；
+    /// overwrite=false 时若目标已存在则返回 false，用于 artifact 的唯一命名。
     /// </summary>
     /// <returns>是否成功写入目标路径。</returns>
     public static async Task<bool> WriteAsync(
@@ -27,6 +62,7 @@ internal static class AtomicFile
             throw new ArgumentException("目标路径不能为空。", nameof(destinationPath));
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var directory = Path.GetDirectoryName(destinationPath)
             ?? throw new ArgumentException("目标路径缺少目录部分。", nameof(destinationPath));
         Directory.CreateDirectory(directory);
@@ -51,6 +87,10 @@ internal static class AtomicFile
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 stream.Flush(flushToDisk: true);
             }
+
+            // 提交点之前响应取消，finally 会删除临时文件；一旦 Move 成功，
+            // 本次写入已提交，不再因随后取消向调用方报告失败。
+            cancellationToken.ThrowIfCancellationRequested();
 
             try
             {

@@ -8,6 +8,10 @@ using BDTool.Contracts.Operations;
 using BDTool.Operations.Catalog;
 using BDTool.Operations.Diagnostics;
 using BDTool.Operations.Handlers;
+using BDTool.Operations.Operations;
+using BDTool.Operations.Projects;
+using BDTool.Operations.Workspace;
+using BDTool.Provider.Local;
 
 namespace BDTool.Composition;
 
@@ -21,7 +25,7 @@ public static class BDToolComposition
     public const string DefaultCatalogRelativePath = "catalog/operations.json";
 
     /// <summary>
-    /// 装配 M0 运行时：目录 + doctor Handler + 文件 Activity/Artifact 存储 + 网关。
+    /// 装配 M1 运行时：目录 + 本地 Workspace Provider + 八个 Handler + 文件存储 + 网关。
     /// 基础设施只在这里创建，CLI 通过运行时访问器查询 Activity。
     /// </summary>
     public static BDToolRuntime Create(BDToolCompositionOptions? options = null)
@@ -38,17 +42,31 @@ public static class BDToolComposition
         var activityStore = new FileActivityStore(projectPath);
         var artifactStore = new FileArtifactStore(projectPath);
 
-        // M0 只注册离线 doctor；一致性校验保证目录不会谎报可用。
+        // 唯一允许直接依赖 Provider.Local 的位置。Provider 绑定项目根，
+        // 描述快照注入 Application/Doctor/能力检查，业务层不按品牌分支。
+        var workspace = new LocalWorkspaceKernel(projectPath);
+        var provider = workspace.DescribeAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var providers = new[] { provider };
+
+        // 一致性校验保证目录不会谎报可用，也不会遗漏已注册 Handler。
         var handlers = new OperationHandlerRegistry();
         handlers.Register(new DoctorHandler(
             new FileSystemDoctorEnvironmentProbe(),
             catalog,
             options.AppVersion,
-            projectPath));
+            projectPath,
+            providers));
+        handlers.Register(new OperationsListHandler(catalog));
+        handlers.Register(new OperationsDescribeHandler(catalog));
+        handlers.Register(new ProjectContextHandler());
+        handlers.Register(new WorkspaceReadHandler());
+        handlers.Register(new WorkspaceSearchHandler());
+        handlers.Register(new WorkspaceFingerprintHandler());
+        handlers.Register(new WorkspaceApplyHandler());
         handlers.EnsureConsistent(catalog);
 
-        var capabilities = new CatalogCapabilityInspector(catalog, handlers);
-        var contextFactory = new OfflineOperationContextFactory(artifactStore, capabilities);
+        var capabilities = new CatalogCapabilityInspector(catalog, handlers, providers);
+        var contextFactory = new OperationContextFactory(workspace, artifactStore, capabilities);
         var gateway = new ApplicationGateway(
             catalog,
             handlers,
@@ -56,7 +74,10 @@ public static class BDToolComposition
             contextFactory,
             activityStore,
             projectPath: projectPath,
-            appVersion: options.AppVersion);
+            appVersion: options.AppVersion,
+            providers: providers,
+            artifacts: artifactStore,
+            executionProviderId: provider.Id);
 
         return new BDToolRuntime(catalog, handlers, gateway, activityStore, projectPath, catalogPath);
     }

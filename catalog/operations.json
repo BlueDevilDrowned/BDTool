@@ -15,6 +15,7 @@
       "resultSchema": {
         "type": "object",
         "required": ["status", "data"],
+        "additionalProperties": true,
         "properties": {
           "status": { "type": "string" },
           "data": {
@@ -28,15 +29,21 @@
               "providers": { "type": "array" },
               "unity": { "type": "object" }
             }
-          }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
         }
       },
       "timeoutSeconds": 30,
       "artifacts": [],
       "implemented": true,
-      "milestone": "M0",
+      "milestone": "M1",
       "availability": "available",
-      "notes": "M0 已注册离线 Handler：检查应用/契约版本、项目与 .bdtool 可写性、Activity 根、目录加载与空 Provider 列表；不连接 Unity。"
+      "notes": "M1 已注册离线 Handler：输入严格为空对象；检查应用/契约版本、项目与 .bdtool 可写性、Activity 根、目录加载与真实 Provider 快照；不连接 Unity。项目根缺失时跳过审计并告警 AUDIT_UNAVAILABLE_PROJECT_MISSING，不创建目录。"
     },
     {
       "id": "operations.list",
@@ -51,17 +58,49 @@
       },
       "resultSchema": {
         "type": "object",
-        "required": ["operations"],
+        "required": ["status", "data"],
         "properties": {
-          "operations": { "type": "array" }
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["operations"],
+            "properties": {
+              "operations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["id", "description", "effect", "environment", "requiredCapabilities", "timeoutSeconds", "implemented", "milestone", "availability"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "description": { "type": "string" },
+                    "effect": { "type": "string" },
+                    "environment": { "type": "array" },
+                    "requiredCapabilities": { "type": "array" },
+                    "timeoutSeconds": { "type": "integer" },
+                    "artifacts": { "type": "array" },
+                    "implemented": { "type": "boolean" },
+                    "milestone": { "type": "string" },
+                    "availability": { "type": "string" },
+                    "notes": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
         }
       },
       "timeoutSeconds": 30,
       "artifacts": [],
-      "implemented": false,
+      "implemented": true,
       "milestone": "M1",
-      "availability": "planned",
-      "notes": "CLI 稳定化阶段实现。"
+      "availability": "available",
+      "notes": "返回 OperationsListData；输入只允许空对象。"
     },
     {
       "id": "operations.describe",
@@ -71,6 +110,7 @@
       "requiredCapabilities": [],
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["operationId"],
         "properties": {
           "operationId": { "type": "string" }
@@ -78,17 +118,300 @@
       },
       "resultSchema": {
         "type": "object",
-        "required": ["operation"],
+        "required": ["status", "data"],
         "properties": {
-          "operation": { "type": "object" }
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["operation"],
+            "properties": {
+              "operation": {
+                "type": "object",
+                "required": ["id", "description", "effect", "environment", "requiredCapabilities", "timeoutSeconds", "implemented", "milestone", "availability", "inputSchemaJson", "resultSchemaJson"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "description": { "type": "string" },
+                  "effect": { "type": "string" },
+                  "environment": { "type": "array" },
+                  "requiredCapabilities": { "type": "array" },
+                  "timeoutSeconds": { "type": "integer" },
+                  "artifacts": { "type": "array" },
+                  "implemented": { "type": "boolean" },
+                  "milestone": { "type": "string" },
+                  "availability": { "type": "string" },
+                  "notes": { "type": "string" },
+                  "inputSchemaJson": { "type": "string" },
+                  "resultSchemaJson": { "type": "string" }
+                }
+              }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
         }
       },
       "timeoutSeconds": 30,
       "artifacts": [],
-      "implemented": false,
+      "implemented": true,
       "milestone": "M1",
-      "availability": "planned",
-      "notes": "CLI 稳定化阶段实现。"
+      "availability": "available",
+      "notes": "输入严格为 {operationId}；未知 ID 返回 NOT_FOUND，多余字段返回 INVALID_ARGUMENT。"
+    },
+    {
+      "id": "project.context",
+      "description": "返回离线项目路径、存在性、Unity 版本、Editor 连接状态与 Provider 能力。",
+      "effect": "read",
+      "environment": ["workspace"],
+      "requiredCapabilities": [],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["projectPath", "projectExists", "editor", "providers", "capabilities", "activityLimits"],
+            "properties": {
+              "projectPath": { "type": "string" },
+              "projectExists": { "type": "boolean" },
+              "unityVersion": { "type": ["string", "null"] },
+              "editor": { "type": "object" },
+              "providers": { "type": "array" },
+              "capabilities": { "type": "object" },
+              "activityLimits": { "type": "object" }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
+        }
+      },
+      "timeoutSeconds": 30,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M1",
+      "availability": "available",
+      "notes": "无 Unity 仍成功；editor.connected=false、status=not-connected。项目缺失返回 PROJECT_NOT_FOUND。"
+    },
+    {
+      "id": "workspace.read",
+      "description": "读取项目内 UTF-8 文本文件，剥离 BOM 并对原始磁盘字节计算 SHA-256。",
+      "effect": "read",
+      "environment": ["workspace"],
+      "requiredCapabilities": ["workspace.read"],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relativePath"],
+        "properties": {
+          "relativePath": { "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["relativePath", "content", "sha256", "length"],
+            "properties": {
+              "relativePath": { "type": "string" },
+              "content": { "type": "string" },
+              "sha256": { "type": "string" },
+              "length": { "type": "integer" }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
+        }
+      },
+      "timeoutSeconds": 30,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M1",
+      "availability": "available",
+      "notes": "最大读取 1 MiB（恰好 1 MiB 允许，超过返回 INVALID_ARGUMENT）；目标缺失 NOT_FOUND，目录或非法路径 INVALID_ARGUMENT。输入不含 projectPath，项目边界由 --project/绑定根决定。"
+    },
+    {
+      "id": "workspace.search",
+      "description": "在项目内执行大小写敏感的字面量文本搜索，跳过排除目录与二进制文件。",
+      "effect": "read",
+      "environment": ["workspace"],
+      "requiredCapabilities": ["workspace.search"],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": { "type": "string" },
+          "glob": { "type": "string" },
+          "maxResults": { "type": "integer" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["matches", "truncated", "skippedBinary", "skippedTooLarge", "skippedSymlink"],
+            "properties": {
+              "matches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["relativePath", "lineNumber", "line"],
+                  "properties": {
+                    "relativePath": { "type": "string" },
+                    "lineNumber": { "type": "integer" },
+                    "line": { "type": "string" }
+                  }
+                }
+              },
+              "truncated": { "type": "boolean" },
+              "skippedBinary": { "type": "integer" },
+              "skippedTooLarge": { "type": "integer" },
+              "skippedSymlink": { "type": "integer" }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
+        }
+      },
+      "timeoutSeconds": 60,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M1",
+      "availability": "available",
+      "notes": "空或全空白 query 返回 INVALID_ARGUMENT；排除 .git/.bdtool/bin/obj/Library/Temp/Logs/UserSettings/node_modules/.vs；maxResults 先收敛到 Provider 上限，匹配最多收集有效 maxResults+1 条并继续统计 skipped，超过上限时 truncated=true；打开候选前整链复检 reparse（计入 skippedSymlink）；排序先按路径序再按 Ordinal 兜底。输入不含 projectPath，项目边界由 --project/绑定根决定。"
+    },
+    {
+      "id": "workspace.fingerprint",
+      "description": "计算项目内一个或多个文件的存在性与原始字节 SHA-256。",
+      "effect": "read",
+      "environment": ["workspace"],
+      "requiredCapabilities": ["workspace.fingerprint"],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relativePaths"],
+        "properties": {
+          "relativePaths": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["files"],
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["relativePath", "sha256", "length", "exists"],
+                  "properties": {
+                    "relativePath": { "type": "string" },
+                    "sha256": { "type": "string" },
+                    "length": { "type": "integer" },
+                    "exists": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
+        }
+      },
+      "timeoutSeconds": 60,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M1",
+      "availability": "available",
+      "notes": "relativePaths 必填，空数组合法；缺失文件返回 exists=false、sha256 为空字符串。输入不含 projectPath，项目边界由 --project/绑定根决定。"
+    },
+    {
+      "id": "workspace.apply",
+      "description": "以 UTF-8 无 BOM 原子写入项目内文本文件，支持 CAS 与 dry-run。",
+      "effect": "workspace-write",
+      "environment": ["workspace"],
+      "requiredCapabilities": ["workspace.write"],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relativePath", "content"],
+        "properties": {
+          "relativePath": { "type": "string" },
+          "content": { "type": "string" },
+          "expectedSha256": { "type": ["string", "null"] },
+          "createIfMissing": { "type": "boolean" },
+          "dryRun": { "type": "boolean" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["relativePath", "newSha256", "changed", "created", "dryRun"],
+            "properties": {
+              "relativePath": { "type": "string" },
+              "previousSha256": { "type": ["string", "null"] },
+              "newSha256": { "type": "string" },
+              "changed": { "type": "boolean" },
+              "created": { "type": "boolean" },
+              "dryRun": { "type": "boolean" }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
+        }
+      },
+      "timeoutSeconds": 60,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M1",
+      "availability": "available",
+      "notes": "content 必填，缺失不等于空串（显式 content=\"\" 才表示清空）；编码后内容最大 1 MiB，dryRun 同样受限；覆盖已有文件必须提供 expectedSha256，陈旧 CAS 返回 PRECONDITION_FAILED 且无副作用；创建使用非覆盖提交，二次预检后目标被创建返回 PRECONDITION_FAILED；父链某段是普通文件返回 INVALID_ARGUMENT/parent-not-directory；更新仍有已承认的 CAS→Move 窗口。输入不含 projectPath，项目边界由 --project/绑定根决定。"
     }
   ]
 }

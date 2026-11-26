@@ -19,6 +19,7 @@ namespace BDTool.Contracts.Errors
         public const string EditorDisconnected = "EDITOR_DISCONNECTED";
         public const string AssetBusy = "ASSET_BUSY";
         public const string Timeout = "TIMEOUT";
+        public const string PreconditionFailed = "PRECONDITION_FAILED";
         public const string Cancelled = "CANCELLED";
         public const string ExecutionFailed = "EXECUTION_FAILED";
         public const string ExecutionUncertain = "EXECUTION_UNCERTAIN";

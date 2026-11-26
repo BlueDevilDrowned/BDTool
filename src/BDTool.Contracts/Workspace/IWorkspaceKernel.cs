@@ -28,6 +28,9 @@ namespace BDTool.Contracts.Workspace
         public string RelativePath { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
         public string Sha256 { get; set; } = string.Empty;
+
+        /// <summary>解码后文本的 UTF-8 字节数；BOM 不计入内容。</summary>
+        public long Length { get; set; }
     }
 
     public sealed class WorkspaceSearchRequest
@@ -49,6 +52,15 @@ namespace BDTool.Contracts.Workspace
     {
         public List<WorkspaceSearchMatch> Matches { get; set; } = new List<WorkspaceSearchMatch>();
         public bool Truncated { get; set; }
+
+        /// <summary>因疑似二进制内容跳过的文件数。</summary>
+        public int SkippedBinary { get; set; }
+
+        /// <summary>因超过搜索文件大小上限跳过的文件数。</summary>
+        public int SkippedTooLarge { get; set; }
+
+        /// <summary>因 reparse point 跳过的文件数。</summary>
+        public int SkippedSymlink { get; set; }
     }
 
     public sealed class WorkspaceFingerprintRequest
@@ -62,6 +74,9 @@ namespace BDTool.Contracts.Workspace
         public string RelativePath { get; set; } = string.Empty;
         public string Sha256 { get; set; } = string.Empty;
         public long Length { get; set; }
+
+        /// <summary>目标当前是否存在；缺失时 Sha256 为空、Length 为 0。</summary>
+        public bool Exists { get; set; }
     }
 
     public sealed class WorkspaceFingerprintResult
@@ -85,5 +100,11 @@ namespace BDTool.Contracts.Workspace
         public string? PreviousSha256 { get; set; }
         public string NewSha256 { get; set; } = string.Empty;
         public bool Changed { get; set; }
+
+        /// <summary>本次调用是否新建了文件。</summary>
+        public bool Created { get; set; }
+
+        /// <summary>是否为 dry-run；为 true 时磁盘内容未被修改。</summary>
+        public bool DryRun { get; set; }
     }
 }

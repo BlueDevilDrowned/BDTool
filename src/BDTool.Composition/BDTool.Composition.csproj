@@ -14,6 +14,7 @@
     <ProjectReference Include="..\BDTool.Operations\BDTool.Operations.csproj" />
     <ProjectReference Include="..\BDTool.Activity\BDTool.Activity.csproj" />
     <ProjectReference Include="..\BDTool.Application\BDTool.Application.csproj" />
+    <ProjectReference Include="..\BDTool.Provider.Local\BDTool.Provider.Local.csproj" />
   </ItemGroup>
 
 </Project>

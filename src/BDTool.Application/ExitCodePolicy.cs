@@ -44,7 +44,10 @@ public static class ExitCodePolicy
             case ErrorCodes.InvalidArgument:
             case ErrorCodes.NotFound:
                 return CliExitCode.InvalidArgument;
+            case ErrorCodes.CapabilityUnsupported:
+                return CliExitCode.CapabilityUnsupported;
             case ErrorCodes.ProjectNotFound:
+                return CliExitCode.EnvironmentNotReady;
             case ErrorCodes.EnvironmentUnsupported:
             case ErrorCodes.ProviderNotFound:
             case ErrorCodes.ProviderVersionMismatch:
@@ -53,6 +56,9 @@ public static class ExitCodePolicy
             case ErrorCodes.EditorNotReady:
             case ErrorCodes.EditorDisconnected:
                 return CliExitCode.EnvironmentNotReady;
+            case ErrorCodes.PreconditionFailed:
+            case ErrorCodes.ExecutionFailed:
+                return CliExitCode.ExecutionFailed;
             case ErrorCodes.Timeout:
                 return CliExitCode.Timeout;
             case ErrorCodes.Cancelled:

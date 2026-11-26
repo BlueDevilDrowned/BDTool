@@ -130,6 +130,23 @@ public sealed class FileActivityStoreTests
     }
 
     [Fact]
+    public async Task RecordAsync_MissingProject_ThrowsAndDoesNotCreateDirectory()
+    {
+        var missingProject = Path.Combine(
+            Path.GetTempPath(),
+            "bdtool-tests",
+            Guid.NewGuid().ToString("n"),
+            "missing");
+        var store = new FileActivityStore(missingProject);
+
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() => store.RecordAsync(
+            CreateRecord("missing-project", new DateTimeOffset(2026, 11, 26, 8, 0, 0, TimeSpan.Zero)),
+            CancellationToken.None));
+
+        Assert.False(Directory.Exists(missingProject), "Activity 写入不得为缺失项目创建目录。");
+    }
+
+    [Fact]
     public async Task GetAsync_MissingIdThrowsFileNotFound()
     {
         using var project = new TemporaryProject();

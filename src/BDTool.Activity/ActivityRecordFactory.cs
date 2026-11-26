@@ -17,12 +17,15 @@ public static class ActivityRecordFactory
     public static ActivityRecord CreateStarted(
         ActivityContext context,
         OperationRequest request,
-        DateTimeOffset startedAt)
+        DateTimeOffset startedAt,
+        ActivityPayloadSummary? inputSummary = null)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(request);
 
-        var input = ActivityContentPolicy.Summarize(request.InputJson, "input");
+        // 调用方可以复用已计算的摘要（例如网关需要据此写 Artifact），
+        // 未传入时仍按同一策略现场计算，保持工厂的纯映射语义。
+        var input = inputSummary ?? ActivityContentPolicy.Summarize(request.InputJson, "input");
         return new ActivityRecord
         {
             ActivityId = context.ActivityId,
@@ -54,12 +57,13 @@ public static class ActivityRecordFactory
         ActivityRecord record,
         OperationResult result,
         int exitCode,
-        DateTimeOffset finishedAt)
+        DateTimeOffset finishedAt,
+        ActivityPayloadSummary? outputSummary = null)
     {
         ArgumentNullException.ThrowIfNull(record);
         ArgumentNullException.ThrowIfNull(result);
 
-        var output = ActivityContentPolicy.Summarize(SerializeForPreview(result), "output");
+        var output = outputSummary ?? ActivityContentPolicy.Summarize(SerializeForPreview(result), "output");
         record.FinishedAt = finishedAt;
         record.Status = result.Status;
         record.ExitCode = exitCode;
@@ -72,7 +76,10 @@ public static class ActivityRecordFactory
         record.Artifacts.AddRange(result.Artifacts);
     }
 
-    private static string SerializeForPreview(OperationResult result)
+    /// <summary>
+    /// 按与 CLI 一致的 camelCase/字符串枚举口径序列化结果，供输出摘要和诊断复用。
+    /// </summary>
+    public static string SerializeForPreview(OperationResult result)
     {
         return System.Text.Json.JsonSerializer.Serialize(
             result,
