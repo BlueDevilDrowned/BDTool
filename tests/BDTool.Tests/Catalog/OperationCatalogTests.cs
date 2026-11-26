@@ -13,7 +13,7 @@ namespace BDTool.Tests.Catalog;
 public sealed class OperationCatalogTests
 {
     [Fact]
-    public void RealCatalog_ContainsTenAvailableM1AndM2Operations()
+    public void RealCatalog_ContainsTwelveAvailableM1ToM3Operations()
     {
         var catalog = OperationCatalogLoader.Load(RepoPaths.CatalogFile);
         var descriptors = catalog.GetAll();
@@ -23,8 +23,10 @@ public sealed class OperationCatalogTests
             {
                 "operations.describe",
                 "operations.list",
+                "project.asset-snapshot",
                 "project.context",
                 "project.inspect",
+                "project.prefab-set-active",
                 "project.probe",
                 "system.doctor",
                 "workspace.apply",
@@ -34,12 +36,12 @@ public sealed class OperationCatalogTests
             },
             descriptors.Select(item => item.Id).OrderBy(id => id, StringComparer.Ordinal));
 
-        // 十个操作都必须有真实 Handler；M2 的 inspect/probe 接线后不得再保留 planned。
+        // 十二个操作都必须有真实 Handler；M3 的 snapshot/set-active 接线后不得再保留 planned。
         foreach (var descriptor in descriptors)
         {
             Assert.True(descriptor.Implemented, descriptor.Id + " 必须标记 implemented。");
             Assert.Equal(OperationAvailability.Available, descriptor.Availability);
-            Assert.Contains(descriptor.Milestone, new[] { "M1", "M2" });
+            Assert.Contains(descriptor.Milestone, new[] { "M1", "M2", "M3" });
         }
 
         Assert.Equal(
@@ -88,6 +90,96 @@ public sealed class OperationCatalogTests
                 "sceneIsDirty", "rootObjectCount", "observedAtUtc"
             }.OrderBy(name => name, StringComparer.Ordinal),
             required.OrderBy(name => name, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void RealCatalog_M3OperationsDeclareEditorSchemasAndTypedResults()
+    {
+        var catalog = OperationCatalogLoader.Load(RepoPaths.CatalogFile);
+
+        var snapshot = Assert.Single(catalog.GetAll(), item => item.Id == "project.asset-snapshot");
+        Assert.Equal(OperationEffects.Read, snapshot.Effect);
+        Assert.Equal(new[] { "editor" }, snapshot.Environment);
+        Assert.Equal(
+            new[] { CapabilityIds.EditorStatus, CapabilityIds.EditorToolRead },
+            snapshot.RequiredCapabilities);
+        Assert.Equal("M3", snapshot.Milestone);
+        Assert.True(snapshot.Implemented);
+        Assert.Equal(OperationAvailability.Available, snapshot.Availability);
+
+        using (var input = JsonDocument.Parse(snapshot.InputSchemaJson))
+        {
+            Assert.False(input.RootElement.GetProperty("additionalProperties").GetBoolean());
+            Assert.Equal(
+                new[] { "assetPath" },
+                input.RootElement.GetProperty("required")
+                    .EnumerateArray()
+                    .Select(item => item.GetString())
+                    .ToArray());
+        }
+
+        using (var result = JsonDocument.Parse(snapshot.ResultSchemaJson))
+        {
+            var required = result.RootElement.GetProperty("properties")
+                .GetProperty("data")
+                .GetProperty("required")
+                .EnumerateArray()
+                .Select(item => item.GetString())
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+            Assert.Equal(
+                new[]
+                {
+                    "projectPath", "assetPath", "exists", "sha256",
+                    "rootObjectName", "childCount", "unityVersion"
+                }.OrderBy(name => name, StringComparer.Ordinal),
+                required);
+        }
+
+        var setActive = Assert.Single(catalog.GetAll(), item => item.Id == "project.prefab-set-active");
+        Assert.Equal(OperationEffects.EditorWrite, setActive.Effect);
+        Assert.Equal(new[] { "editor" }, setActive.Environment);
+        Assert.Equal(
+            new[] { CapabilityIds.EditorStatus, CapabilityIds.EditorToolWrite },
+            setActive.RequiredCapabilities);
+        Assert.Equal("M3", setActive.Milestone);
+        Assert.True(setActive.Implemented);
+        Assert.Equal(OperationAvailability.Available, setActive.Availability);
+
+        using (var input = JsonDocument.Parse(setActive.InputSchemaJson))
+        {
+            Assert.False(input.RootElement.GetProperty("additionalProperties").GetBoolean());
+            Assert.Equal(
+                new[] { "assetPath", "expectedSha256", "isActive" },
+                input.RootElement.GetProperty("required")
+                    .EnumerateArray()
+                    .Select(item => item.GetString())
+                    .OrderBy(name => name, StringComparer.Ordinal));
+            Assert.Equal(
+                "boolean",
+                input.RootElement.GetProperty("properties").GetProperty("isActive").GetProperty("type").GetString());
+            Assert.Equal(
+                "boolean",
+                input.RootElement.GetProperty("properties").GetProperty("dryRun").GetProperty("type").GetString());
+        }
+
+        using (var result = JsonDocument.Parse(setActive.ResultSchemaJson))
+        {
+            var data = result.RootElement.GetProperty("properties").GetProperty("data");
+            var required = data.GetProperty("required")
+                .EnumerateArray()
+                .Select(item => item.GetString())
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+            Assert.Equal(
+                new[]
+                {
+                    "projectPath", "assetPath", "previousSha256", "newSha256",
+                    "wasActive", "isActive", "changed", "saved",
+                    "dryRun", "undoGroup", "verified"
+                }.OrderBy(name => name, StringComparer.Ordinal),
+                required);
+        }
     }
 
     [Fact]
@@ -187,6 +279,10 @@ public sealed class OperationCatalogTests
                     "includeTags", "includeTransform", "maxDepth", "maxObjects", "nameOnly"
                 }),
             ["project.probe"] = (Array.Empty<string>(), Array.Empty<string>()),
+            ["project.asset-snapshot"] = (new[] { "assetPath" }, new[] { "assetPath" }),
+            ["project.prefab-set-active"] = (
+                new[] { "assetPath", "expectedSha256", "isActive" },
+                new[] { "assetPath", "expectedSha256", "isActive", "dryRun" }),
             ["workspace.read"] = (new[] { "relativePath" }, new[] { "relativePath" }),
             ["workspace.search"] = (
                 new[] { "query" },

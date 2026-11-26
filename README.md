@@ -1,17 +1,18 @@
 # BDTool
 
-BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool；目录 10 个操作全部 `available`，产品版本 `0.2.0`，里程碑 `M2`。M2 仍只覆盖只读 Editor 快照与层级读取，不包含 M3、写操作或播放模式。
+BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool。**M3 已完成并真实验证**：新增只读 `project.asset-snapshot` 与单 Prefab 根对象 activeSelf 写入 `project.prefab-set-active`，目录 12 个操作全部 `available`；已在 Unity `6000.6.0f1` fixture 上跑通资产快照、dry-run、真实写入、stale CAS 拒绝与回滚恢复，Core EditMode 测试 25/25 通过。
 
 ## 当前状态
 
 - 已冻结解决方案、程序集、命名空间与 CLI 可执行名：`BDTool` / `bdtool`。
-- 产品版本 `0.2.0`，里程碑 `M2`；`BDToolIdentity` 与 `Directory.Build.props` 的版本保持同步。
-- 目录共十个操作：全部已注册 Handler 并标记为 `available`，包括 M1 的 `system.doctor`、`operations.list`、`operations.describe`、`project.context`、`workspace.read`、`workspace.search`、`workspace.fingerprint`、`workspace.apply`，以及 M2 的 `project.inspect`、`project.probe`。
+- 产品版本 `0.3.0`，里程碑 `M3`；`BDToolIdentity`、`Directory.Build.props` 与 `BDTool.Provider.Akio` 的 `ImplementationVersion` 均为 `0.3.0`。
+- 目录共十二个操作：全部已注册 Handler 并标记为 `available`，包括 M1 的 `system.doctor`、`operations.list`、`operations.describe`、`project.context`、`workspace.read`、`workspace.search`、`workspace.fingerprint`、`workspace.apply`，M2 的 `project.inspect`、`project.probe`，以及 M3 的 `project.asset-snapshot`、`project.prefab-set-active`。
 - `BDTool.Provider.Local` 上报 `workspace.read/search/fingerprint/write` 四个能力；Composition 是应用侧唯一引用该 Provider 的程序集。
-- `BDTool.Provider.Akio` 为可选 Editor Provider，通过 `unity-cli` 上报 `editor.status`、`editor.tool.read`；Composition 同样是唯一引用它的程序集。未安装 `unity-cli` 时应用仍按 M1 本地能力运行。
+- `BDTool.Provider.Akio` 为可选 Editor Provider，通过 `unity-cli` 上报 `editor.status`、`editor.tool.read`、`editor.tool.write`、`editor.job`、`editor.cancel`；Composition 同样是唯一引用它的程序集。未安装 `unity-cli` 时应用仍按 M1 本地能力运行。
 - 每次有效调用都会尽力写入 Activity；`activity list` / `activity show` 可查询。
 - `doctor` 与 `context` 只有在 Editor 报告 `ready` 且其挂载项目与请求项目一致时才显示 Connected/Pass；超时与 Provider 错误分别映射为稳定的未连接状态。
 - 真实 Unity 6 端到端已验证：`system ping`、`project.inspect`、`project.probe` custom tool 均通过 `unity-cli`/Akio Provider/Gateway 产品链路执行，Activity 记录 `providerId=akio` 且状态 `completed`。
+- M3 真实 Unity 6 端到端已验证：`project.asset-snapshot` 成功；`project.prefab-set-active` 的 dry-run、真实写入、stale CAS 拒绝与恢复均按预期工作（详见下文 M3 章节）。
 
 ## 目录
 
@@ -21,7 +22,7 @@ Directory.Build.props
 catalog/operations.json
 src/BDTool.Contracts        BCL-only 公共 DTO、Port、错误与能力
 src/BDTool.Core             不依赖外部系统的领域规则（路径策略、原子写）
-src/BDTool.Operations       目录加载/校验、输入解析与十个 Handler
+src/BDTool.Operations       目录加载/校验、输入解析与十二个 Handler（含 M3 Projects）
 src/BDTool.Activity         Activity 存储与脱敏策略
 src/BDTool.Application      用例运行时、能力检查、超时与退出码映射
 src/BDTool.Provider.Local   本地 Workspace Provider（仅依赖 Contracts/Core）
@@ -29,7 +30,7 @@ src/BDTool.Provider.Akio    可选 unity-cli 只读 Editor Provider（仅依赖 
 src/BDTool.Composition      唯一组合根
 src/BDTool.Cli              bdtool 可执行入口
 tests/BDTool.Tests          单元、组合、CLI 与架构测试
-docs/decisions              决策记录（0001-0005）
+docs/decisions              决策记录（0001-0006）
 ```
 
 ## 构建与测试
@@ -55,6 +56,8 @@ bdtool operations list [--project <path>]
 bdtool operations describe workspace.read [--project <path>]
 bdtool run workspace.read --input input.json [--project <path>]
 bdtool run workspace.apply --input-json '{"relativePath":"Assets/a.txt","content":"hi","createIfMissing":true}' [--dry-run]
+bdtool run project.asset-snapshot --input-json '{"assetPath":"Assets/Prefabs/A.prefab"}' [--project <path>]
+bdtool run project.prefab-set-active --input-json '{"assetPath":"Assets/Prefabs/A.prefab","expectedSha256":"<sha256>","isActive":false,"dryRun":true}' [--project <path>]
 bdtool workspace.fingerprint --input-json '{"relativePaths":["Assets/a.txt"]}'
 bdtool activity list [--project <path>]
 bdtool activity show <activityId> [--project <path>]
@@ -92,7 +95,7 @@ bdtool --version | --help
 - `dryRun=true` 只做路径、大小、CAS 与父链结构预检，不创建目录、临时文件或目标。
 - 有效超时为 `min(请求值, 目录 timeoutSeconds)`；超时 `TIMEOUT`/`6`，调用方取消 `CANCELLED`/`7`，两者都写 Activity 终态。
 
-## Editor（M2 已完成）
+## Editor（M2、M3 均已完成并真实验证）
 
 - `project.inspect` 环境为 `workspace` + `editor`，要求 `editor.status` 与 `editor.tool.read`；通过 `get_hierarchy` 只读读取层级，参数 `maxDepth` 范围 `0..32`、`maxObjects` 范围 `1..10000`。
 - 结果为 DTO 结构：`projectPath`、`unityVersion`、`sceneName`、`isPrefabMode`、`objectCount` 与递归 `children` 节点；上游未提供版本时 `unityVersion` 为空字符串。
@@ -102,7 +105,25 @@ bdtool --version | --help
 - `project.inspect` 通过 `get_hierarchy` 读取真实层级；`project.probe` custom tool 返回 Product、UnityVersion、Platform、SceneName、ScenePath、SceneIsDirty、RootObjectCount、ObservedAtUtc 全部 typed 字段。
 - 对应产品调用写出 Activity，记录 `providerId=akio`、状态 `completed`。
 - `refresh_assets` 之后实际观察到 1 次 ping 失败，随后恢复；该瞬态失败未产生错误的成功结论，也未改变只读边界。
-- 当前仅只读：不修改场景、资源或 Editor 状态，不提供播放模式控制，也不写入项目文件；不覆盖全部 Unity 工具，也不代表 M3。
+- 本节两个操作当前仅只读：不修改场景、资源或 Editor 状态，不提供播放模式控制，也不写入项目文件；不覆盖全部 Unity 工具。M3 的唯一写入能力见下节。
+
+## M3 Prefab（已完成并真实验证）
+
+- `project.asset-snapshot`：环境仅 `editor`，要求 `editor.status` + `editor.tool.read`；输入严格为 `{assetPath}`，`Mutating=false`、空 `WriteScope`，通过 Editor Provider 调用 `bdtool_core_read`，并把结果严格收敛为 `projectPath`、`assetPath`、`exists`、`sha256`、`rootObjectName`、`childCount`、`unityVersion` 七个 typed 字段。
+- `project.prefab-set-active`：环境仅 `editor`，要求 `editor.status` + `editor.tool.write`；输入严格为 `{assetPath, expectedSha256, isActive, dryRun?}`，`isActive` 必填布尔值，`additionalProperties=false`。
+- operation ID 使用连字符形式；上游 tool 名保持 `bdtool_core_read` 与 `bdtool_core_prefab_set_active` 不变。
+- 写前 CAS：Submit 之前先用 Workspace 指纹确认 `expectedSha256` 与磁盘一致；不一致返回 `PRECONDITION_FAILED`，且不创建 Editor Job。
+- 写请求：`Mutating=true`、`WriteScope=[assetPath]`、`ExpectedFingerprint` 与请求/输入 dry-run 并集一并下发；上游执行 Undo 组、保存、强制同步导入与回读验证。
+- 写后证据：非 dry-run 要求 `changed=true`、`saved=true`、`verified=true`、`isActive` 回读等于请求值且 `newSha256 != previousSha256`，并再次读取 Workspace 指纹作为磁盘证据；`ChangedAssets`、`Proof.InputFingerprint`、`Proof.OutputFingerprint`、`Evidence` 与 warnings 由真实结果填充。
+- dry-run：不创建 Undo 组、不保存、不修改资产，也不要求文件 SHA 变化；`Proof` 的输入/输出指纹都等于 pre-SHA，结果只描述 activeSelf 预检。
+- 提交后超时、取消或无法确认写入结果返回 `EXECUTION_UNCERTAIN`/`Uncertain`，不伪装成可安全重试的普通失败。
+- 仅支持单个 Prefab 根对象 activeSelf；不支持 multi-asset、bulk、场景写入、播放模式或 M4 能力。
+- 验证环境：Unity `6000.6.0f1`，fixture `E:\AI\BDTools\M3TestArea\Unity6Fixture`；两个 BDTool 包以 embedded 方式安装成功。
+- Core EditMode 过滤测试 25/25 通过，结果文件 `E:\AI\BDTools\M3TestArea\Results\core-editmode-final2.xml`（`result="Passed"`）。
+- adapter tools schema 如实上报：`bdtool_core_read` 为 `mutating=false`，`bdtool_core_prefab_set_active` 为 `mutating=true`。
+- `project.asset-snapshot` 在真实 Prefab 上成功返回 typed 快照。
+- dry-run 实测 `Saved=false` 且文件 SHA 不变；真写实测 activeSelf `true` → `false`、`Saved=true`、`Verified=true`、SHA `c11...` → `031...`；stale CAS 以 exit `5`/`PRECONDITION_FAILED` 拒绝且 SHA 不变；恢复 activeSelf `true` 后 SHA 回到 `c11...`。
+- Activity 记录 `providerId=akio`、状态 `completed`、`changedAssets=Assets/BDToolM3/ActivationProbe.prefab`；`refresh_assets` 后观察到 1 次 ping 失败随后恢复，新工具重新发现并完成写入。
 
 ## Activity
 
@@ -113,9 +134,10 @@ bdtool --version | --help
 
 ## 明确限制
 
-- M2 已完成范围为可选的 `unity-cli` 只读 Editor 能力（状态、层级与 custom probe 快照）；不包含 M3、写操作、播放模式或全部 Unity 工具。
-- 真实 Unity 6 验证使用 `E:\AI\BDTools\M2TestArea` fixture，原 TTF2 未修改；验证依赖本机 `unity-cli`/bridge `0.19.1`。
+- M2 已完成范围为可选的 `unity-cli` 只读 Editor 能力（状态、层级与 custom probe 快照）；M3 已完成并真实验证单 Prefab 根对象 activeSelf 写入与资产快照。
+- M3 不包含 multi-asset、bulk、场景写入、播放模式或全部 Unity 工具；`project.prefab-set-active` 只接受单个 `assetPath`。
+- 真实 Unity 6 验证使用 `E:\AI\BDTools\M2TestArea`（M2）与 `E:\AI\BDTools\M3TestArea\Unity6Fixture`（M3）fixture，原 TTF2 未修改；验证依赖本机 `unity-cli`/bridge。
 - 未安装 `unity-cli` 或 Editor 未就绪时，Editor 能力返回未就绪/不支持，M1 本地操作不受影响。
 - 不支持二进制写入、流式传输、跨进程强一致 CAS 或 CLI `--timeout` 覆盖；`workspace.apply` 编码后上限 1 MiB。
 - Activity 列表最多返回最近 100 条摘要；不持久化 Started 中间态。
-- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md) 与 [0005](docs/decisions/0005-bdtool-m2-akio-editor.md)。
+- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md)、[0005](docs/decisions/0005-bdtool-m2-akio-editor.md) 与 [0006](docs/decisions/0006-bdtool-m3-unity-core.md)。

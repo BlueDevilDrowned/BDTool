@@ -73,6 +73,7 @@ public static class ActivityRecordFactory
             Redacted = output.Redacted,
             PreviewJson = output.PreviewJson
         };
+        record.ChangedAssets.AddRange(result.ChangedAssets);
         record.Artifacts.AddRange(result.Artifacts);
     }
 

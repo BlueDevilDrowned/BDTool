@@ -82,6 +82,8 @@ public static class BDToolComposition
         handlers.Register(new ProjectContextHandler());
         handlers.Register(new ProjectInspectHandler());
         handlers.Register(new ProjectProbeHandler());
+        handlers.Register(new ProjectAssetSnapshotHandler());
+        handlers.Register(new PrefabSetActiveHandler());
         handlers.Register(new WorkspaceReadHandler());
         handlers.Register(new WorkspaceSearchHandler());
         handlers.Register(new WorkspaceFingerprintHandler());

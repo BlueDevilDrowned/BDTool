@@ -66,6 +66,7 @@ namespace BDTool.Contracts.Activity
         public int? ExitCode { get; set; }
         public KernelError? Error { get; set; }
         public string JobId { get; set; } = string.Empty;
+        public List<string> ChangedAssets { get; set; } = new List<string>();
         public List<ArtifactReference> Artifacts { get; set; } = new List<ArtifactReference>();
     }
 

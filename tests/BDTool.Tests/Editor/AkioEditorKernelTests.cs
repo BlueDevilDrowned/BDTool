@@ -59,6 +59,12 @@ public sealed class AkioEditorKernelTests
         }
         """;
 
+    private const string PrefabSetActiveWriteInput =
+        """{"isActive":true,"dryRun":false,"expectedSha256":"sha256:abc123"}""";
+
+    private const string PrefabSetActiveDryRunInput =
+        """{"isActive":true,"dryRun":true,"expectedSha256":"sha256:abc123"}""";
+
     [Fact]
     public async Task Describe_AdvertisesEditorCapabilitiesWithoutBrandBranches()
     {
@@ -70,8 +76,10 @@ public sealed class AkioEditorKernelTests
         Assert.Equal("akio", descriptor.Id);
         Assert.Equal(ProviderKinds.Editor, descriptor.Kind);
         Assert.Equal(BDToolContract.Version, descriptor.ContractVersion);
+        Assert.Equal("0.3.0", descriptor.ImplementationVersion);
         Assert.True(descriptor.Capabilities[CapabilityIds.EditorStatus]);
         Assert.True(descriptor.Capabilities[CapabilityIds.EditorToolRead]);
+        Assert.True(descriptor.Capabilities[CapabilityIds.EditorToolWrite]);
         Assert.True(descriptor.Capabilities[CapabilityIds.EditorJob]);
         Assert.True(descriptor.Capabilities[CapabilityIds.EditorCancel]);
     }
@@ -379,6 +387,203 @@ public sealed class AkioEditorKernelTests
     }
 
     [Fact]
+    public async Task SubmitAssetSnapshot_UsesDeclaredReadToolAndPreservesInput()
+    {
+        const string input = """{"assetPath":"Assets/Test.prefab"}""";
+        UnityCliInvocation? schemaCall = null;
+        UnityCliInvocation? toolCall = null;
+        using var kernel = CreateReadOnlyToolKernel(
+            "bdtool_core_read",
+            (invocation, _) =>
+            {
+                toolCall = invocation;
+                return Task.FromResult(Success("""{"exists":true}"""));
+            },
+            schemaCall: invocation => schemaCall = invocation);
+
+        var handle = await kernel.SubmitAsync(
+            new EditorOperationRequest
+            {
+                ProjectPath = TestProjectPath,
+                OperationId = "project.asset-snapshot",
+                InputJson = input
+            },
+            CancellationToken.None);
+        var result = await WaitForTerminalAsync(kernel, handle);
+
+        Assert.Equal(OperationStatus.Completed, result.Status);
+        Assert.NotNull(schemaCall);
+        Assert.True(HasSequence(schemaCall!, "tool", "schema", "bdtool_core_read"));
+        Assert.NotNull(toolCall);
+        Assert.True(HasSequence(
+            toolCall!,
+            "tool",
+            "call",
+            "bdtool_core_read",
+            "--json",
+            input));
+    }
+
+    [Fact]
+    public async Task SubmitPrefabSetActive_DryRunUsesCoreParametersWithoutGlobalCliFlag()
+    {
+        UnityCliInvocation? schemaCall = null;
+        UnityCliInvocation? toolCall = null;
+        using var kernel = CreateWriteToolKernel(
+            (invocation, _) =>
+            {
+                toolCall = invocation;
+                return Task.FromResult(Success("""{"isActive":true,"dryRun":true,"changed":false}"""));
+            },
+            schemaCall: invocation => schemaCall = invocation);
+
+        var handle = await kernel.SubmitAsync(
+            CreatePrefabSetActiveRequest(
+                dryRun: true,
+                inputJson: PrefabSetActiveDryRunInput),
+            CancellationToken.None);
+        var result = await WaitForTerminalAsync(kernel, handle);
+
+        Assert.Equal(OperationStatus.Completed, result.Status);
+        Assert.NotNull(schemaCall);
+        Assert.True(HasSequence(
+            schemaCall!,
+            "tool",
+            "schema",
+            "bdtool_core_prefab_set_active"));
+        Assert.NotNull(toolCall);
+        Assert.True(HasSequence(
+            toolCall!,
+            "tool",
+            "call",
+            "bdtool_core_prefab_set_active",
+            "--json",
+            PrefabSetActiveDryRunInput));
+        Assert.DoesNotContain("--dry-run", toolCall!.Arguments);
+    }
+
+    [Fact]
+    public async Task SubmitPrefabSetActive_RejectsReadOnlyToolSchema()
+    {
+        var calls = 0;
+        using var kernel = CreateWriteToolKernel(
+            (_, _) =>
+            {
+                calls++;
+                throw new InvalidOperationException("schema 预检拒绝后不应进入 tool call。");
+            },
+            schemaMutating: false);
+
+        var exception = await Assert.ThrowsAsync<EditorException>(() =>
+            kernel.SubmitAsync(
+                CreatePrefabSetActiveRequest(),
+                CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.PreconditionFailed, exception.Code);
+        Assert.Equal("non_mutating_tool", exception.Details["reason"]);
+        Assert.Equal("true", exception.Details["expectedMutating"]);
+        Assert.Equal("false", exception.Details["actualMutating"]);
+        Assert.Equal(0, calls);
+    }
+
+    [Theory]
+    [InlineData("project.asset-snapshot", true, false)]
+    [InlineData("project.prefab-set-active", false, true)]
+    public async Task Submit_RejectsRequestMutatingMismatch(
+        string operationId,
+        bool requestMutating,
+        bool expectedMutating)
+    {
+        var calls = 0;
+        using var kernel = CreateKernel((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(Success("{}"));
+        });
+        var isWrite = string.Equals(
+            operationId,
+            "project.prefab-set-active",
+            StringComparison.Ordinal);
+
+        var exception = await Assert.ThrowsAsync<EditorException>(() =>
+            kernel.SubmitAsync(
+                new EditorOperationRequest
+                {
+                    ProjectPath = TestProjectPath,
+                    OperationId = operationId,
+                    Mutating = requestMutating,
+                    InputJson = isWrite ? PrefabSetActiveWriteInput : "{}",
+                    WriteScope = isWrite
+                        ? new List<string> { "Assets/Prefabs" }
+                        : new List<string>()
+                },
+                CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.InvalidArgument, exception.Code);
+        Assert.Equal("mutating_request_mismatch", exception.Details["reason"]);
+        Assert.Equal(expectedMutating ? "true" : "false", exception.Details["expectedMutating"]);
+        Assert.Equal(requestMutating ? "true" : "false", exception.Details["requestMutating"]);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public async Task SubmitPrefabSetActive_RejectsEmptyWriteScope()
+    {
+        var calls = 0;
+        using var kernel = CreateKernel((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(Success("{}"));
+        });
+
+        var exception = await Assert.ThrowsAsync<EditorException>(() =>
+            kernel.SubmitAsync(
+                CreatePrefabSetActiveRequest(writeScope: new List<string> { "   " }),
+                CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.InvalidArgument, exception.Code);
+        Assert.Equal("write_scope_required", exception.Details["reason"]);
+        Assert.Equal(0, calls);
+    }
+
+    [Theory]
+    [InlineData(
+        """{"dryRun":false,"expectedSha256":"sha256:abc123"}""",
+        "prefab_set_active_is_active_required")]
+    [InlineData(
+        """{"isActive":true,"dryRun":false}""",
+        "prefab_set_active_expected_sha256_required")]
+    [InlineData(
+        """{"isActive":true,"expectedSha256":"sha256:abc123"}""",
+        "prefab_set_active_dry_run_required")]
+    [InlineData(
+        """{"isActive":"true","dryRun":false,"expectedSha256":"sha256:abc123"}""",
+        "prefab_set_active_is_active_required")]
+    [InlineData(
+        """{"isActive":true,"dryRun":"false","expectedSha256":"sha256:abc123"}""",
+        "prefab_set_active_dry_run_required")]
+    public async Task SubmitPrefabSetActive_RejectsMissingCoreParameters(
+        string inputJson,
+        string reason)
+    {
+        var calls = 0;
+        using var kernel = CreateKernel((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(Success("{}"));
+        });
+
+        var exception = await Assert.ThrowsAsync<EditorException>(() =>
+            kernel.SubmitAsync(
+                CreatePrefabSetActiveRequest(inputJson: inputJson),
+                CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.InvalidArgument, exception.Code);
+        Assert.Equal(reason, exception.Details["reason"]);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
     public async Task SubmitProbe_RejectsMutatingToolSchema()
     {
         using var kernel = CreateProbeSchemaKernel(
@@ -437,6 +642,72 @@ public sealed class AkioEditorKernelTests
         var error = Assert.Single(result.Errors);
         Assert.Equal(ErrorCodes.Timeout, error.Code);
         Assert.Equal("timeout", error.Details["reason"]);
+    }
+
+    [Fact]
+    public async Task SubmitAssetSnapshot_MapsTimeoutToTimeout()
+    {
+        using var kernel = CreateReadOnlyToolKernel(
+            "bdtool_core_read",
+            (_, _) => Task.FromException<UnityCliProcessResult>(
+                new TimeoutException("timed out")));
+
+        var handle = await kernel.SubmitAsync(
+            new EditorOperationRequest
+            {
+                OperationId = "project.asset-snapshot",
+                ProjectPath = TestProjectPath,
+                InputJson = """{"assetPath":"Assets/Test.prefab"}"""
+            },
+            CancellationToken.None);
+        var result = await WaitForTerminalAsync(kernel, handle);
+
+        Assert.Equal(OperationStatus.Failed, result.Status);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(ErrorCodes.Timeout, error.Code);
+        Assert.Equal("timeout", error.Details["reason"]);
+        Assert.True(error.Retryable);
+    }
+
+    [Fact]
+    public async Task SubmitPrefabSetActive_MapsTimeoutToUncertain()
+    {
+        using var kernel = CreateWriteToolKernel((_, _) =>
+            Task.FromException<UnityCliProcessResult>(new TimeoutException("timed out")));
+
+        var handle = await kernel.SubmitAsync(
+            CreatePrefabSetActiveRequest(),
+            CancellationToken.None);
+        var result = await WaitForTerminalAsync(kernel, handle);
+
+        Assert.Equal(OperationStatus.Uncertain, result.Status);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(ErrorCodes.ExecutionUncertain, error.Code);
+        Assert.False(error.Retryable);
+        Assert.Equal("timeout", error.Details["reason"]);
+        Assert.Equal("possible", error.Details["sideEffectRisk"]);
+    }
+
+    [Fact]
+    public async Task Cancel_WriteJobAfterStartMapsToUncertain()
+    {
+        using var kernel = CreateWriteToolKernel(async (_, cancellationToken) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        });
+
+        var handle = await kernel.SubmitAsync(
+            CreatePrefabSetActiveRequest(),
+            CancellationToken.None);
+        await kernel.CancelAsync(handle, CancellationToken.None);
+        var result = await WaitForTerminalAsync(kernel, handle);
+
+        Assert.Equal(OperationStatus.Uncertain, result.Status);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(ErrorCodes.ExecutionUncertain, error.Code);
+        Assert.False(error.Retryable);
+        Assert.Equal("possible", error.Details["sideEffectRisk"]);
     }
 
     [Fact]
@@ -564,12 +835,61 @@ public sealed class AkioEditorKernelTests
         Assert.Equal(0, calls);
     }
 
+    private static EditorOperationRequest CreatePrefabSetActiveRequest(
+        bool mutating = true,
+        bool dryRun = false,
+        string inputJson = PrefabSetActiveWriteInput,
+        List<string>? writeScope = null) =>
+        new()
+        {
+            ProjectPath = TestProjectPath,
+            OperationId = "project.prefab-set-active",
+            InputJson = inputJson,
+            Mutating = mutating,
+            DryRun = dryRun,
+            WriteScope = writeScope ?? new List<string> { "Assets/Prefabs" }
+        };
+
     private static AkioEditorKernel CreateInspectKernel(
         Func<UnityCliInvocation, CancellationToken, Task<UnityCliProcessResult>> toolCall,
         int completedJobRetentionMilliseconds = 30_000) =>
         CreateReadOnlyToolKernel(
             "get_hierarchy",
             toolCall,
+            completedJobRetentionMilliseconds);
+
+    private static AkioEditorKernel CreateWriteToolKernel(
+        Func<UnityCliInvocation, CancellationToken, Task<UnityCliProcessResult>> toolCall,
+        bool schemaMutating = true,
+        int completedJobRetentionMilliseconds = 30_000,
+        Action<UnityCliInvocation>? schemaCall = null) =>
+        CreateKernel(
+            (invocation, cancellationToken) =>
+            {
+                if (HasSequence(invocation, "editor", "status"))
+                {
+                    return Task.FromResult(Success(ReadyData));
+                }
+
+                if (HasSequence(invocation, "tool", "schema", "bdtool_core_prefab_set_active"))
+                {
+                    schemaCall?.Invoke(invocation);
+                    return Task.FromResult(Success(System.Text.Json.JsonSerializer.Serialize(
+                        new
+                        {
+                            name = "bdtool_core_prefab_set_active",
+                            mutating = schemaMutating,
+                            params_schema = new { }
+                        })));
+                }
+
+                if (HasSequence(invocation, "tool", "call", "bdtool_core_prefab_set_active"))
+                {
+                    return toolCall(invocation, cancellationToken);
+                }
+
+                throw new InvalidOperationException("写工具测试桩收到未知 unity-cli 命令。");
+            },
             completedJobRetentionMilliseconds);
 
     private static AkioEditorKernel CreateReadOnlyToolKernel(

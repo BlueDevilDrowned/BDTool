@@ -587,7 +587,7 @@ public static class CliEntrypoint
         writer.WriteLine("  bdtool activity list|show <activityId> [--project <path>] [--human]");
         writer.WriteLine("  bdtool --version | --help");
         writer.WriteLine();
-        writer.WriteLine("M2 部分范围: M1 本地 Workspace + 可选 unity-cli 只读 Editor（project.inspect）；真实 Unity 6 尚未验证。");
+        writer.WriteLine("M3 范围: 本地 Workspace + 可选 Akio Editor；已真实验证 Unity 6 的 scene inspect、custom probe 与 Prefab activeSelf 受控写入。");
         writer.WriteLine("unity-cli 发现顺序: --unity-cli → BDTOOL_UNITY_CLI_PATH → 当前目录及祖先 .tools/unity-cli → PATH（只读，不改 PATH）。");
         writer.WriteLine();
         writer.WriteLine("退出码:");

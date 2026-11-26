@@ -191,6 +191,45 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
+    public void Operations_SourcesDoNotReferenceProcessNetworkUnityOrProviders()
+    {
+        // Operations 只能通过 Contracts 端口访问外部世界。直接用进程、网络或 Unity 类型
+        // 会绕过 Editor/Workspace Provider 的能力与审计边界，必须在架构层拦住。
+        var directory = Path.Combine(RepoPaths.Root, "src", "BDTool.Operations");
+        var forbidden = new[]
+        {
+            "System.Diagnostics",
+            "System.Net",
+            "UnityEditor",
+            "UnityEngine",
+            "BDTool.Provider"
+        };
+
+        var violations = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories))
+        {
+            foreach (var line in File.ReadLines(file))
+            {
+                var trimmed = line.TrimStart();
+                if (!trimmed.StartsWith("using ", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                foreach (var prefix in forbidden)
+                {
+                    if (trimmed.IndexOf(prefix, StringComparison.Ordinal) >= 0)
+                    {
+                        violations.Add($"{Path.GetFileName(file)}: {trimmed}");
+                    }
+                }
+            }
+        }
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
     public void Contracts_DoNotExposeUniversalObjectBusinessResults()
     {
         var directory = Path.Combine(RepoPaths.Root, "src", "BDTool.Contracts");

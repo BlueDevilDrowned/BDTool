@@ -46,6 +46,12 @@ namespace BDTool.Contracts.Editor
         public string? ExpectedFingerprint { get; set; }
         public int TimeoutSeconds { get; set; } = 60;
         public bool DryRun { get; set; }
+
+        /// <summary>
+        /// 调用方是否明确请求写工具。Provider 必须同时验证操作映射与上游
+        /// schema 的 mutating 标记，不能仅凭工具名放行。
+        /// </summary>
+        public bool Mutating { get; set; }
     }
 
     /// <summary>

@@ -44,8 +44,8 @@ public sealed class CliEntrypointTests
         var data = root.GetProperty("data");
         Assert.Equal(JsonValueKind.Object, data.ValueKind);
         Assert.Equal("ready", data.GetProperty("state").GetString());
-        Assert.Equal("M2", data.GetProperty("milestone").GetString());
-        Assert.Equal("0.2.0", data.GetProperty("appVersion").GetString());
+        Assert.Equal("M3", data.GetProperty("milestone").GetString());
+        Assert.Equal("0.3.0", data.GetProperty("appVersion").GetString());
         Assert.Equal(BDToolContract.Version, data.GetProperty("contractVersion").GetString());
         Assert.Equal(Path.GetFullPath(project.ProjectPath), data.GetProperty("projectPath").GetString());
 
@@ -204,7 +204,7 @@ public sealed class CliEntrypointTests
         var root = document.RootElement;
         Assert.Equal("completed", root.GetProperty("status").GetString());
         var operations = root.GetProperty("data").GetProperty("operations").EnumerateArray().ToArray();
-        Assert.Equal(10, operations.Length);
+        Assert.Equal(12, operations.Length);
         Assert.Contains(operations, item => item.GetProperty("id").GetString() == "workspace.read");
         Assert.All(
             operations,
@@ -213,6 +213,12 @@ public sealed class CliEntrypointTests
         Assert.True(probe.GetProperty("implemented").GetBoolean());
         Assert.Equal("available", probe.GetProperty("availability").GetString());
         Assert.Equal("M2", probe.GetProperty("milestone").GetString());
+
+        var snapshot = Assert.Single(operations, item => item.GetProperty("id").GetString() == "project.asset-snapshot");
+        Assert.Equal("M3", snapshot.GetProperty("milestone").GetString());
+        var setActive = Assert.Single(operations, item => item.GetProperty("id").GetString() == "project.prefab-set-active");
+        Assert.Equal("editor-write", setActive.GetProperty("effect").GetString());
+        Assert.Equal("M3", setActive.GetProperty("milestone").GetString());
 
         // operations.list 不得在解析阶段直接读取目录而绕过审计。
         using var record = ReadSingleActivity(project);
@@ -643,7 +649,7 @@ public sealed class CliEntrypointTests
         var (exitCode, stdout, stderr) = await RunAsync("--version");
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("bdtool 0.2.0", stdout, StringComparison.Ordinal);
+        Assert.Contains("bdtool 0.3.0", stdout, StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr);
     }
 

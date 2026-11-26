@@ -111,6 +111,24 @@ public sealed class ApplicationGatewayTests
     }
 
     [Fact]
+    public async Task CompletedHandler_PersistsChangedAssetsInActivity()
+    {
+        var descriptor = Descriptor("project.prefab-set-active", implemented: true);
+        var registry = new OperationHandlerRegistry().Register(
+            new StubHandler("project.prefab-set-active", "Assets/Test.prefab"));
+        var sink = new StubActivitySink();
+        var gateway = CreateGateway(descriptor, registry, new StubContextFactory(), sink);
+
+        await gateway.ExecuteAsync(
+            Request("project.prefab-set-active"),
+            Activity(),
+            CancellationToken.None);
+
+        var record = Assert.Single(sink.Records);
+        Assert.Equal(new[] { "Assets/Test.prefab" }, record.ChangedAssets);
+    }
+
+    [Fact]
     public async Task HandlerException_BecomesExecutionFailure()
     {
         var descriptor = Descriptor("system.doctor", implemented: true);
@@ -863,7 +881,13 @@ public sealed class ApplicationGatewayTests
 
     private sealed class StubHandler : IOperationHandler
     {
-        public StubHandler(string operationId) => OperationId = operationId;
+        private readonly string[] _changedAssets;
+
+        public StubHandler(string operationId, params string[] changedAssets)
+        {
+            OperationId = operationId;
+            _changedAssets = changedAssets;
+        }
 
         public string OperationId { get; }
 
@@ -877,6 +901,7 @@ public sealed class ApplicationGatewayTests
                 Status = OperationStatus.Completed,
                 Data = new DoctorData { State = "ready" }
             };
+            result.ChangedAssets.AddRange(_changedAssets);
             return Task.FromResult(result);
         }
     }

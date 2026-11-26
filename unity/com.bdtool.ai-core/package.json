@@ -1,0 +1,19 @@
+{
+  "name": "com.bdtool.ai-core",
+  "version": "0.3.0",
+  "displayName": "BDTool Unity Core",
+  "description": "BDTool 的 Unity Editor 同步资产快照与 Prefab 根对象受控重命名服务。",
+  "unity": "2022.3",
+  "type": "tool",
+  "hideInEditor": false,
+  "keywords": [
+    "bdtool",
+    "editor",
+    "asset",
+    "prefab"
+  ],
+  "author": {
+    "name": "BDTool"
+  },
+  "dependencies": {}
+}

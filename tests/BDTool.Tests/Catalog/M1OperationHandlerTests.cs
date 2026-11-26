@@ -36,7 +36,7 @@ public sealed class M1OperationHandlerTests
     private static IOperationCatalog Catalog() => OperationCatalogLoader.Load(RepoPaths.CatalogFile);
 
     [Fact]
-    public async Task OperationsList_ReturnsTypedTenOperationSummaries()
+    public async Task OperationsList_ReturnsTypedTwelveOperationSummaries()
     {
         var handler = new OperationsListHandler(Catalog());
 
@@ -47,7 +47,7 @@ public sealed class M1OperationHandlerTests
 
         var typed = Assert.IsType<OperationResult<OperationsListData>>(result);
         Assert.Equal(OperationStatus.Completed, typed.Status);
-        Assert.Equal(10, typed.Data.Operations.Count);
+        Assert.Equal(12, typed.Data.Operations.Count);
         Assert.Contains(typed.Data.Operations, item => item.Id == "workspace.apply" && item.Implemented);
         Assert.Contains(
             typed.Data.Operations,
@@ -56,6 +56,19 @@ public sealed class M1OperationHandlerTests
             typed.Data.Operations,
             item => item.Id == "project.probe"
                     && item.Milestone == "M2"
+                    && item.Implemented
+                    && item.Availability == "available");
+        Assert.Contains(
+            typed.Data.Operations,
+            item => item.Id == "project.asset-snapshot"
+                    && item.Milestone == "M3"
+                    && item.Implemented
+                    && item.Availability == "available");
+        Assert.Contains(
+            typed.Data.Operations,
+            item => item.Id == "project.prefab-set-active"
+                    && item.Effect == "editor-write"
+                    && item.Milestone == "M3"
                     && item.Implemented
                     && item.Availability == "available");
     }

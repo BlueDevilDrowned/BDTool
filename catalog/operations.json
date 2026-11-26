@@ -323,6 +323,107 @@
       "notes": "输入严格为空对象；产品链路已接入 ProjectProbeHandler，结果收敛为 typed 8 字段 Product/UnityVersion/Platform/SceneName/ScenePath/SceneIsDirty/RootObjectCount/ObservedAtUtc。真实 Unity 6 custom tool 已有直接 CLI 证据，但真实端到端执行仍待验证；只读，不修改场景或资源。"
     },
     {
+      "id": "project.asset-snapshot",
+      "description": "通过 Editor Provider 的只读工具读取单个 Prefab 的稳定资产快照。",
+      "effect": "read",
+      "environment": ["editor"],
+      "requiredCapabilities": ["editor.status", "editor.tool.read"],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["assetPath"],
+        "properties": {
+          "assetPath": { "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["projectPath", "assetPath", "exists", "sha256", "rootObjectName", "childCount", "unityVersion"],
+            "properties": {
+              "projectPath": { "type": "string" },
+              "assetPath": { "type": "string" },
+              "exists": { "type": "boolean" },
+              "sha256": { "type": "string" },
+              "rootObjectName": { "type": "string" },
+              "childCount": { "type": "integer" },
+              "unityVersion": { "type": "string" }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
+        }
+      },
+      "timeoutSeconds": 30,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M3",
+      "availability": "available",
+      "notes": "输入严格为 {assetPath}；调用 bdtool_core_read，结果收敛为 typed 7 字段快照。资产路径语义、存在性与哈希口径由 Unity Core 负责；只读，不修改资产。真实 Unity M3 端到端尚未验证。"
+    },
+    {
+      "id": "project.prefab-set-active",
+      "description": "在 SHA-256 CAS 保护下切换单个 Prefab 根对象的 activeSelf，支持 dry-run、Undo、保存与回读验证。",
+      "effect": "editor-write",
+      "environment": ["editor"],
+      "requiredCapabilities": ["editor.status", "editor.tool.write"],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["assetPath", "expectedSha256", "isActive"],
+        "properties": {
+          "assetPath": { "type": "string" },
+          "expectedSha256": { "type": "string" },
+          "isActive": { "type": "boolean" },
+          "dryRun": { "type": "boolean" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["projectPath", "assetPath", "previousSha256", "newSha256", "wasActive", "isActive", "changed", "saved", "dryRun", "undoGroup", "verified"],
+            "properties": {
+              "projectPath": { "type": "string" },
+              "assetPath": { "type": "string" },
+              "previousSha256": { "type": "string" },
+              "newSha256": { "type": "string" },
+              "wasActive": { "type": "boolean" },
+              "isActive": { "type": "boolean" },
+              "changed": { "type": "boolean" },
+              "saved": { "type": "boolean" },
+              "dryRun": { "type": "boolean" },
+              "undoGroup": { "type": "string" },
+              "verified": { "type": "boolean" }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
+        }
+      },
+      "timeoutSeconds": 120,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M3",
+      "availability": "available",
+      "notes": "输入严格为 {assetPath, expectedSha256, isActive, dryRun?}；Submit 前由 Workspace 校验 SHA-256 CAS，不一致返回 PRECONDITION_FAILED 且不触达 Editor。上游 tool 为 bdtool_core_prefab_set_active；非 dry-run 使用 Undo 组、保存、强制同步导入与回读验证，要求 verified=true、isActive 回读正确且写入后 SHA 变化，并以磁盘指纹作为证据；提交后超时/取消或无法确认结果返回 EXECUTION_UNCERTAIN。dryRun 不创建 Undo、不保存、不要求 SHA 变化。仅支持单资产 Prefab 根对象 activeSelf，不支持 multi-asset、bulk 或 M4 能力；真实 Unity M3 端到端尚未验证。"
+    },
+    {
       "id": "workspace.read",
       "description": "读取项目内 UTF-8 文本文件，剥离 BOM 并对原始磁盘字节计算 SHA-256。",
       "effect": "read",

@@ -24,7 +24,7 @@ public sealed class DoctorHandlerTests
         var typed = Assert.IsType<OperationResult<DoctorReport>>(result);
         Assert.Equal(OperationStatus.Completed, typed.Status);
         Assert.Equal(DoctorStates.Degraded, typed.Data.State);
-        Assert.Equal("M2", typed.Data.Milestone);
+        Assert.Equal("M3", typed.Data.Milestone);
         Assert.Empty(typed.Data.Providers);
         Assert.False(typed.Data.Unity.Connected);
         Assert.Equal("not-assembled", typed.Data.Unity.Integration);

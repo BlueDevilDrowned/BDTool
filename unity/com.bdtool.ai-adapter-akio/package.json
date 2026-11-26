@@ -1,0 +1,20 @@
+{
+  "name": "com.bdtool.ai-adapter-akio",
+  "displayName": "BDTool AI Adapter for Akio Unity CLI",
+  "version": "0.3.0",
+  "unity": "2022.3",
+  "description": "Exposes the BDTool Unity Core asset snapshot and controlled Prefab root activation services as unity-cli bridge custom tools.",
+  "keywords": [
+    "bdtool",
+    "unity-cli",
+    "adapter",
+    "prefab"
+  ],
+  "author": {
+    "name": "BDTool"
+  },
+  "dependencies": {
+    "com.bdtool.ai-core": "0.3.0",
+    "com.akiojin.unity-cli-bridge": "0.19.1"
+  }
+}

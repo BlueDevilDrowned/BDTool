@@ -1,0 +1,19 @@
+{
+  "name": "BDTool.UnityAdapter.Akio.Editor",
+  "rootNamespace": "BDTool.UnityAdapter.Akio",
+  "references": [
+    "BDTool.UnityCore.Editor",
+    "UnityCliBridge.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

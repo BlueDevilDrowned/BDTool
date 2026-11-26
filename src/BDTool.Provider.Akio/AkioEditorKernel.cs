@@ -18,14 +18,23 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
     private const string StatusStage = "editor.status";
     private const string ToolSchemaStage = "editor.tool.schema";
     private const string ToolCallStage = "editor.tool.call";
+    private const string PrefabSetActiveOperationId = "project.prefab-set-active";
 
-    /// <summary>当前只开放经过只读 schema 校验的 inspect/probe 操作。</summary>
-    private static readonly IReadOnlyDictionary<string, string> OperationTools =
-        new Dictionary<string, string>(StringComparer.Ordinal)
+    /// <summary>
+    /// 公共操作到 unity-cli 工具的静态映射。ExpectedMutating 是 Provider 的
+    /// 安全声明：Schema 预检和请求 Mutating 标志都必须与它一致，不能靠工具名推断。
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, OperationTool> OperationTools =
+        new Dictionary<string, OperationTool>(StringComparer.Ordinal)
         {
-            ["project.inspect"] = "get_hierarchy",
-            ["project.probe"] = "bdtool_read_only_probe"
+            ["project.inspect"] = new("get_hierarchy", false),
+            ["project.probe"] = new("bdtool_read_only_probe", false),
+            ["project.asset-snapshot"] = new("bdtool_core_read", false),
+            [PrefabSetActiveOperationId] = new("bdtool_core_prefab_set_active", true)
         };
+
+    /// <summary>一个操作声明对应的上游工具及其是否允许写入。</summary>
+    private sealed record OperationTool(string ToolName, bool ExpectedMutating);
 
     private readonly AkioEditorOptions _options;
     private readonly IUnityCliProcessRunner _runner;
@@ -82,11 +91,12 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
             DisplayName = "Akio Unity Editor",
             Kind = ProviderKinds.Editor,
             ContractVersion = BDToolContract.Version,
-            ImplementationVersion = "0.2.0",
+            ImplementationVersion = "0.3.0",
             Capabilities = new Dictionary<string, bool>(StringComparer.Ordinal)
             {
                 [CapabilityIds.EditorStatus] = true,
                 [CapabilityIds.EditorToolRead] = true,
+                [CapabilityIds.EditorToolWrite] = true,
                 [CapabilityIds.EditorJob] = true,
                 [CapabilityIds.EditorCancel] = true
             },
@@ -138,7 +148,8 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!OperationTools.TryGetValue(request.OperationId ?? string.Empty, out var toolName))
+        var operationId = request.OperationId ?? string.Empty;
+        if (!OperationTools.TryGetValue(operationId, out var operation))
         {
             throw new EditorException(
                 ErrorCodes.CapabilityUnsupported,
@@ -152,9 +163,10 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
 
         var projectPath = ResolveRequestedProjectPath(request.ProjectPath);
         var inputJson = ValidateInputJson(request.InputJson);
+        var inputDryRun = ValidateOperationRequest(request, operation, inputJson);
         var timeoutMilliseconds = ResolveTimeoutMilliseconds(request.TimeoutSeconds);
 
-        // 进程启动前完成项目身份、Editor 就绪状态与工具只读性检查。
+        // 进程启动前完成项目身份、Editor 就绪状态与工具预期写入性检查。
         // 任何一项失败都不创建 Job，也不执行 tool call。
         try
         {
@@ -165,8 +177,9 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
                 .ConfigureAwait(false);
             EnsureReadyForToolCall(status);
 
-            await EnsureToolIsReadOnlyAsync(
-                    toolName,
+            await EnsureToolSchemaAsync(
+                    operation.ToolName,
+                    operation.ExpectedMutating,
                     projectPath,
                     timeoutMilliseconds,
                     cancellationToken)
@@ -174,13 +187,21 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
         }
         catch (Exception exception)
         {
-            throw MapException(exception, ToolSchemaStage, cancellationToken, toolName);
+            throw MapException(
+                exception,
+                ToolSchemaStage,
+                cancellationToken,
+                operation.ToolName);
         }
 
+        // 只有非 dry-run 的写操作才会在进程启动后形成副作用风险。请求与 Core
+        // 参数必须同时声明 dry-run，避免任一标志失真导致误判为“无写入风险”。
+        var hasWriteRisk = operation.ExpectedMutating && !(request.DryRun && inputDryRun);
         var job = new EditorJob(
             "akio-" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture),
-            request.OperationId,
-            toolName);
+            operationId,
+            operation.ToolName,
+            hasWriteRisk);
 
         // Job 的 Completion 在构造时固定，并先发布到字典再启动 worker，
         // 避免调用方查到 Job 但 Completion 尚未赋值。
@@ -317,8 +338,9 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
     }
 
     /// <summary>
-    /// 执行已经通过只读预检的 tool call。结果先写入稳定的 Completion，
-    /// 再等待保留期并从 Job 表移除；失败只保留稳定错误和脱敏诊断。
+    /// 执行已经通过声明预检的 tool call。结果先写入稳定的 Completion，
+    /// 再等待保留期并从 Job 表移除；写操作在取消或超时后可能已经落盘，
+    /// 因此必须返回 Uncertain，不能伪装成普通取消/超时并允许自动重试。
     /// </summary>
     private async Task RunJobAsync(
         EditorJob job,
@@ -351,9 +373,25 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
         }
         catch (OperationCanceledException exception)
         {
-            result = CreateCancelledResult(
-                job,
-                MapException(exception, ToolCallStage, job.CancellationToken, job.ToolName));
+            var mapped = MapException(
+                exception,
+                ToolCallStage,
+                job.CancellationToken,
+                job.ToolName);
+            result = job.HasWriteRisk
+                ? CreateUncertainResult(job, mapped)
+                : CreateCancelledResult(job, mapped);
+        }
+        catch (TimeoutException exception)
+        {
+            var mapped = MapException(
+                exception,
+                ToolCallStage,
+                job.CancellationToken,
+                job.ToolName);
+            result = job.HasWriteRisk
+                ? CreateUncertainResult(job, mapped)
+                : CreateFailedResult(job, mapped);
         }
         catch (Exception exception)
         {
@@ -517,11 +555,12 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
     }
 
     /// <summary>
-    /// 在调用工具前读取并验证 unity-cli schema。只有名称匹配且
-    /// `mutating` 明确为 false 的内置工具才允许执行。
+    /// 在调用工具前读取并验证 unity-cli schema。工具名称必须匹配，
+    /// `mutating` 必须是布尔值且与操作映射的 ExpectedMutating 完全一致。
     /// </summary>
-    private async Task EnsureToolIsReadOnlyAsync(
+    private async Task EnsureToolSchemaAsync(
         string toolName,
+        bool expectedMutating,
         string projectPath,
         int timeoutMilliseconds,
         CancellationToken cancellationToken)
@@ -564,12 +603,19 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
                 "工具 schema 缺少明确的只读标记。");
         }
 
-        if (mutating.ValueKind == JsonValueKind.True)
+        var actualMutating = mutating.ValueKind == JsonValueKind.True;
+        if (actualMutating != expectedMutating)
         {
+            var reason = expectedMutating ? "non_mutating_tool" : "mutating_tool";
+            var message = expectedMutating
+                ? "写操作声明的工具未被 schema 标记为 mutating。"
+                : "拒绝执行标记为 mutating 的只读工具。";
             throw CreateSchemaRejection(
                 toolName,
-                "mutating_tool",
-                "拒绝执行标记为 mutating 的工具。");
+                reason,
+                message,
+                expectedMutating: expectedMutating,
+                actualMutating: actualMutating);
         }
     }
 
@@ -577,7 +623,9 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
         string toolName,
         string reason,
         string message,
-        string? returnedToolName = null)
+        string? returnedToolName = null,
+        bool? expectedMutating = null,
+        bool? actualMutating = null)
     {
         var details = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -588,6 +636,16 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
         if (!string.IsNullOrWhiteSpace(returnedToolName))
         {
             details["returnedToolName"] = returnedToolName;
+        }
+
+        if (expectedMutating.HasValue)
+        {
+            details["expectedMutating"] = expectedMutating.Value ? "true" : "false";
+        }
+
+        if (actualMutating.HasValue)
+        {
+            details["actualMutating"] = actualMutating.Value ? "true" : "false";
         }
 
         return new EditorException(ErrorCodes.PreconditionFailed, message, details);
@@ -683,6 +741,106 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
                     ["reason"] = "invalid_json"
                 });
         }
+    }
+
+    /// <summary>
+    /// 校验请求声明与操作映射一致，并在进程启动前落实写操作的最小防御条件。
+    /// 返回值表示 prefab_set_active 输入是否声明为 dry-run；只有请求和输入同时为
+    /// dry-run 时，Job 才不会被视为存在副作用风险。
+    /// </summary>
+    private static bool ValidateOperationRequest(
+        EditorOperationRequest request,
+        OperationTool operation,
+        string inputJson)
+    {
+        if (request.Mutating != operation.ExpectedMutating)
+        {
+            throw new EditorException(
+                ErrorCodes.InvalidArgument,
+                "请求的 Mutating 标记与操作声明不一致。",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["stage"] = "input",
+                    ["reason"] = "mutating_request_mismatch",
+                    ["operationId"] = request.OperationId ?? string.Empty,
+                    ["expectedMutating"] = operation.ExpectedMutating ? "true" : "false",
+                    ["requestMutating"] = request.Mutating ? "true" : "false"
+                });
+        }
+
+        if (!operation.ExpectedMutating)
+        {
+            return false;
+        }
+
+        if (request.WriteScope is null
+            || !request.WriteScope.Any(static scope => !string.IsNullOrWhiteSpace(scope)))
+        {
+            throw new EditorException(
+                ErrorCodes.InvalidArgument,
+                "写操作必须声明非空 WriteScope。",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["stage"] = "input",
+                    ["reason"] = "write_scope_required",
+                    ["operationId"] = request.OperationId ?? string.Empty
+                });
+        }
+
+        if (!string.Equals(
+                request.OperationId,
+                PrefabSetActiveOperationId,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        using var document = JsonDocument.Parse(inputJson);
+        var input = document.RootElement;
+        if (!input.TryGetProperty("isActive", out var isActive)
+            || isActive.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            throw new EditorException(
+                ErrorCodes.InvalidArgument,
+                "prefab_set_active 输入必须包含布尔 isActive。",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["stage"] = "input",
+                    ["reason"] = "prefab_set_active_is_active_required",
+                    ["operationId"] = request.OperationId ?? string.Empty
+                });
+        }
+
+        if (!input.TryGetProperty("expectedSha256", out var expectedSha256)
+            || expectedSha256.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(expectedSha256.GetString()))
+        {
+            throw new EditorException(
+                ErrorCodes.InvalidArgument,
+                "prefab_set_active 输入必须包含非空 expectedSha256。",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["stage"] = "input",
+                    ["reason"] = "prefab_set_active_expected_sha256_required",
+                    ["operationId"] = request.OperationId ?? string.Empty
+                });
+        }
+
+        if (!input.TryGetProperty("dryRun", out var dryRun)
+            || dryRun.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            throw new EditorException(
+                ErrorCodes.InvalidArgument,
+                "prefab_set_active 输入必须包含布尔 dryRun。",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["stage"] = "input",
+                    ["reason"] = "prefab_set_active_dry_run_required",
+                    ["operationId"] = request.OperationId ?? string.Empty
+                });
+        }
+
+        return dryRun.GetBoolean();
     }
 
     private static void EnsureProjectIdentity(
@@ -845,6 +1003,29 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
         EditorException exception) =>
         CreateErrorResult(job, OperationStatus.Cancelled, exception);
 
+    /// <summary>
+    /// 写调用一旦启动，取消/超时只能证明本地等待结束，不能证明 Unity 端没有
+    /// 写入。统一收敛为 EXECUTION_UNCERTAIN，并保留原始 stage/reason 供诊断；
+    /// Retryable 固定为 false，防止调用方自动重放可能已生效的写操作。
+    /// </summary>
+    private static EditorOperationResult CreateUncertainResult(
+        EditorJob job,
+        EditorException exception)
+    {
+        var details = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var pair in exception.Details)
+        {
+            details[pair.Key] = pair.Value;
+        }
+
+        details["sideEffectRisk"] = "possible";
+        var uncertain = new EditorException(
+            ErrorCodes.ExecutionUncertain,
+            "写操作已启动，但取消或超时后无法确认 Unity 端执行结果；禁止自动重试。",
+            details);
+        return CreateErrorResult(job, OperationStatus.Uncertain, uncertain);
+    }
+
     private static EditorOperationResult CreateErrorResult(
         EditorJob job,
         OperationStatus status,
@@ -938,16 +1119,22 @@ public sealed class AkioEditorKernel : IEditorKernel, IDisposable
         private int _finished;
         private int _disposed;
 
-        public EditorJob(string jobId, string operationId, string toolName)
+        public EditorJob(
+            string jobId,
+            string operationId,
+            string toolName,
+            bool hasWriteRisk)
         {
             JobId = jobId;
             OperationId = operationId;
             ToolName = toolName;
+            HasWriteRisk = hasWriteRisk;
         }
 
         public string JobId { get; }
         public string OperationId { get; }
         public string ToolName { get; }
+        public bool HasWriteRisk { get; }
         public CancellationToken CancellationToken => _cancellation.Token;
         public Task<EditorOperationResult> Completion => _completion.Task;
 
