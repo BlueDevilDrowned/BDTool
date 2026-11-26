@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using BDTool.Contracts;
+using BDTool.Contracts.Editor;
 using BDTool.Contracts.Errors;
 using BDTool.Contracts.Operations;
 using BDTool.Contracts.Providers;
@@ -23,10 +24,10 @@ public sealed class DoctorHandlerTests
         var typed = Assert.IsType<OperationResult<DoctorReport>>(result);
         Assert.Equal(OperationStatus.Completed, typed.Status);
         Assert.Equal(DoctorStates.Degraded, typed.Data.State);
-        Assert.Equal("M1", typed.Data.Milestone);
+        Assert.Equal("M2", typed.Data.Milestone);
         Assert.Empty(typed.Data.Providers);
         Assert.False(typed.Data.Unity.Connected);
-        Assert.Equal("not-implemented", typed.Data.Unity.Integration);
+        Assert.Equal("not-assembled", typed.Data.Unity.Integration);
         Assert.Empty(typed.Errors);
 
         var unity = Assert.Single(typed.Data.Checks, check => check.Id == "unity.connection");
@@ -112,6 +113,74 @@ public sealed class DoctorHandlerTests
         Assert.False(typed.Data.Unity.Connected);
         var unity = Assert.Single(typed.Data.Checks, item => item.Id == "unity.connection");
         Assert.Equal(DoctorCheckStatuses.Skipped, unity.Status);
+    }
+
+    [Fact]
+    public async Task EditorReadyForRequestedProject_PassesUnityConnection()
+    {
+        var typed = await RunWithEditorAsync(new EditorStatus
+        {
+            State = "ready",
+            ProjectPath = @"C:\project",
+            UnityVersion = "6000.0.0f1"
+        });
+
+        Assert.Equal(OperationStatus.Completed, typed.Status);
+        Assert.Equal(DoctorStates.Ready, typed.Data.State);
+        Assert.True(typed.Data.Unity.Connected);
+        Assert.Equal("ready", typed.Data.Unity.Integration);
+        var check = Assert.Single(typed.Data.Checks, item => item.Id == "unity.connection");
+        Assert.Equal(DoctorCheckStatuses.Pass, check.Status);
+    }
+
+    [Theory]
+    [InlineData(@"C:\other-project")]
+    [InlineData("")]
+    public async Task EditorReadyForUnconfirmedProject_WarnsAndStaysDisconnected(string reportedProjectPath)
+    {
+        var typed = await RunWithEditorAsync(new EditorStatus
+        {
+            State = "ready",
+            ProjectPath = reportedProjectPath
+        });
+
+        Assert.Equal(DoctorStates.Degraded, typed.Data.State);
+        Assert.False(typed.Data.Unity.Connected);
+        var check = Assert.Single(typed.Data.Checks, item => item.Id == "unity.connection");
+        Assert.Equal(DoctorCheckStatuses.Warn, check.Status);
+        Assert.Contains(
+            string.IsNullOrWhiteSpace(reportedProjectPath) ? "projectPath=<empty>" : "不一致",
+            check.Detail,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditorTimeout_MapsToStableTimeoutStateAndFails()
+    {
+        var typed = await RunWithEditorAsync(exception: new TimeoutException("状态查询超时。"));
+
+        Assert.Equal(OperationStatus.Failed, typed.Status);
+        Assert.Equal(DoctorStates.NotReady, typed.Data.State);
+        Assert.False(typed.Data.Unity.Connected);
+        Assert.Equal("timeout", typed.Data.Unity.Integration);
+        var check = Assert.Single(typed.Data.Checks, item => item.Id == "unity.connection");
+        Assert.Equal(DoctorCheckStatuses.Fail, check.Status);
+        Assert.Equal(ErrorCodes.EnvironmentUnsupported, Assert.Single(typed.Errors).Code);
+    }
+
+    [Fact]
+    public async Task EditorException_MapsToStableErrorStateAndFails()
+    {
+        var typed = await RunWithEditorAsync(
+            exception: new EditorException(ErrorCodes.PreconditionFailed, "项目不匹配。"));
+
+        Assert.Equal(OperationStatus.Failed, typed.Status);
+        Assert.Equal(DoctorStates.NotReady, typed.Data.State);
+        Assert.False(typed.Data.Unity.Connected);
+        Assert.Equal("error", typed.Data.Unity.Integration);
+        Assert.Contains(ErrorCodes.PreconditionFailed, typed.Data.Unity.Detail, StringComparison.Ordinal);
+        var check = Assert.Single(typed.Data.Checks, item => item.Id == "unity.connection");
+        Assert.Equal(DoctorCheckStatuses.Fail, check.Status);
     }
 
     [Fact]
@@ -276,6 +345,22 @@ public sealed class DoctorHandlerTests
         return Assert.IsType<OperationResult<DoctorReport>>(result);
     }
 
+    private static async Task<OperationResult<DoctorReport>> RunWithEditorAsync(
+        EditorStatus? status = null,
+        Exception? exception = null)
+    {
+        var handler = new DoctorHandler(
+            new FakeProbe(FullyWritableSnapshot()),
+            CatalogWithDoctor(),
+            "0.1.0",
+            @"C:\project",
+            new[] { ValidWorkspaceProvider() },
+            new FakeEditor(status, exception));
+
+        var result = await handler.ExecuteAsync(Request(), StubContext.Instance, CancellationToken.None);
+        return Assert.IsType<OperationResult<DoctorReport>>(result);
+    }
+
     private static ProviderDescriptor ValidWorkspaceProvider() => new ProviderDescriptor
     {
         Id = "local",
@@ -333,6 +418,47 @@ public sealed class DoctorHandlerTests
 
         public Task<DoctorEnvironmentSnapshot> ProbeAsync(string projectPath, CancellationToken cancellationToken) =>
             Task.FromResult(_snapshot);
+    }
+
+    /// <summary>用固定状态或异常模拟 Editor Provider，不启动真实 Unity。</summary>
+    private sealed class FakeEditor : IEditorKernel
+    {
+        private readonly EditorStatus? _status;
+        private readonly Exception? _exception;
+
+        public FakeEditor(EditorStatus? status, Exception? exception)
+        {
+            _status = status;
+            _exception = exception;
+        }
+
+        public Task<ProviderDescriptor> DescribeAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new ProviderDescriptor
+            {
+                Id = "akio",
+                DisplayName = "Akio",
+                Kind = ProviderKinds.Editor,
+                ContractVersion = BDToolContract.Version,
+                ImplementationVersion = "0.2.0"
+            });
+
+        public Task<EditorStatus> GetStatusAsync(
+            EditorStatusRequest request,
+            CancellationToken cancellationToken) =>
+            _exception is null
+                ? Task.FromResult(_status ?? throw new InvalidOperationException("测试未提供 Editor 状态。"))
+                : Task.FromException<EditorStatus>(_exception);
+
+        public Task<OperationHandle> SubmitAsync(
+            EditorOperationRequest request,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<EditorOperationResult> GetResultAsync(
+            OperationHandle handle,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task CancelAsync(OperationHandle handle, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class RecordingProbe : IDoctorEnvironmentProbe

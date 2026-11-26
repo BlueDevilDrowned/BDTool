@@ -46,5 +46,8 @@ namespace BDTool.Contracts.Providers
         public const string WorkspaceSearch = "workspace.search";
         public const string WorkspaceFingerprint = "workspace.fingerprint";
         public const string EditorStatus = "editor.status";
+        public const string EditorToolRead = "editor.tool.read";
+        public const string EditorJob = "editor.job";
+        public const string EditorCancel = "editor.cancel";
     }
 }

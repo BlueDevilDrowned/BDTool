@@ -10,6 +10,13 @@ internal sealed class CliOptions
     public bool DryRun { get; set; }
     public string ProjectPath { get; set; } = string.Empty;
     public string? CatalogPath { get; set; }
+
+    /// <summary>显式 unity-cli 路径；为空时由组合根按默认发现顺序查找。</summary>
+    public string? UnityCliPath { get; set; }
+
+    /// <summary>显式 Unity Editor 路径；为空时由组合根读取环境变量。</summary>
+    public string? UnityEditorPath { get; set; }
+
     public string? InputFile { get; set; }
     public string? InputJson { get; set; }
 }
@@ -35,6 +42,8 @@ internal static class CliOptionParser
         var options = new CliOptions();
         var projectSeen = false;
         var catalogSeen = false;
+        var unityCliSeen = false;
+        var unityEditorSeen = false;
         var inputSeen = false;
         var inputJsonSeen = false;
         var dryRunSeen = false;
@@ -88,6 +97,34 @@ internal static class CliOptionParser
 
                     catalogSeen = true;
                     options.CatalogPath = catalogPath;
+                    break;
+                case "--unity-cli":
+                    if (unityCliSeen)
+                    {
+                        return OptionParseResult.Failure("重复选项 --unity-cli。");
+                    }
+
+                    if (!TryReadValue(args, ref index, "--unity-cli", out var unityCliPath))
+                    {
+                        return OptionParseResult.Failure("--unity-cli 需要一个可执行文件路径。");
+                    }
+
+                    unityCliSeen = true;
+                    options.UnityCliPath = unityCliPath;
+                    break;
+                case "--unity-editor":
+                    if (unityEditorSeen)
+                    {
+                        return OptionParseResult.Failure("重复选项 --unity-editor。");
+                    }
+
+                    if (!TryReadValue(args, ref index, "--unity-editor", out var unityEditorPath))
+                    {
+                        return OptionParseResult.Failure("--unity-editor 需要一个可执行文件路径。");
+                    }
+
+                    unityEditorSeen = true;
+                    options.UnityEditorPath = unityEditorPath;
                     break;
                 case "--input" when allowOperationOptions:
                     if (inputSeen || inputJsonSeen)

@@ -402,7 +402,9 @@ public static class CliEntrypoint
             var runtime = BDToolComposition.Create(new BDToolCompositionOptions
             {
                 ProjectPath = options.ProjectPath,
-                CatalogPath = options.CatalogPath
+                CatalogPath = options.CatalogPath,
+                UnityCliPath = options.UnityCliPath,
+                UnityEditorPath = options.UnityEditorPath
             });
             return (runtime, null);
         }
@@ -576,16 +578,17 @@ public static class CliEntrypoint
         writer.WriteLine($"{BDToolIdentity.ExecutableName} {BDToolIdentity.Version}（{BDToolIdentity.ProductName} {BDToolIdentity.Milestone}）");
         writer.WriteLine();
         writer.WriteLine("用法（默认 JSON；--human 切换人类输出）:");
-        writer.WriteLine("  bdtool doctor [--project <path>] [--human]");
-        writer.WriteLine("  bdtool context [--project <path>] [--human]");
+        writer.WriteLine("  bdtool doctor [--project <path>] [--unity-cli <exe>] [--unity-editor <exe>] [--human]");
+        writer.WriteLine("  bdtool context [--project <path>] [--unity-cli <exe>] [--unity-editor <exe>] [--human]");
         writer.WriteLine("  bdtool operations list [--project <path>] [--human]");
         writer.WriteLine("  bdtool operations describe <id> [--project <path>] [--human]");
-        writer.WriteLine("  bdtool run <id> [--input <file> | --input-json <json>] [--dry-run] [--project <path>] [--human]");
-        writer.WriteLine("  bdtool <id> [--input <file> | --input-json <json>] [--project <path>] [--human]");
+        writer.WriteLine("  bdtool run <id> [--input <file> | --input-json <json>] [--dry-run] [--project <path>] [--unity-cli <exe>] [--human]");
+        writer.WriteLine("  bdtool <id> [--input <file> | --input-json <json>] [--project <path>] [--unity-cli <exe>] [--human]");
         writer.WriteLine("  bdtool activity list|show <activityId> [--project <path>] [--human]");
         writer.WriteLine("  bdtool --version | --help");
         writer.WriteLine();
-        writer.WriteLine("M1 范围: 本地 Workspace read/search/fingerprint/apply；不连接 Unity。");
+        writer.WriteLine("M2 部分范围: M1 本地 Workspace + 可选 unity-cli 只读 Editor（project.inspect）；真实 Unity 6 尚未验证。");
+        writer.WriteLine("unity-cli 发现顺序: --unity-cli → BDTOOL_UNITY_CLI_PATH → 当前目录及祖先 .tools/unity-cli → PATH（只读，不改 PATH）。");
         writer.WriteLine();
         writer.WriteLine("退出码:");
         writer.WriteLine("  0 成功  2 参数/未找到  3 能力不支持  4 项目/环境未就绪  5 执行失败");

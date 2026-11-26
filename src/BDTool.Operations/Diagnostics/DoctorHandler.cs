@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BDTool.Contracts;
+using BDTool.Contracts.Editor;
 using BDTool.Contracts.Errors;
 using BDTool.Contracts.Operations;
 using BDTool.Contracts.Providers;
@@ -15,8 +16,8 @@ using BDTool.Operations.Input;
 namespace BDTool.Operations.Diagnostics;
 
 /// <summary>
-/// M1 的 system.doctor 实现。检查应用自身、项目目录、Activity 存储与本地 Provider 快照，
-/// 不启动或连接 Unity；Unity 状态固定为未连接，避免把环境探测误报为集成成功。
+/// system.doctor 实现。检查应用自身、项目目录、Activity 存储与 Provider 快照；
+/// 装配 Editor Provider 时读取真实 Editor 状态，未装配时明确标记为 skipped。
 /// </summary>
 public sealed class DoctorHandler : IOperationHandler
 {
@@ -43,6 +44,7 @@ public sealed class DoctorHandler : IOperationHandler
     private readonly string _appVersion;
     private readonly string _defaultProjectPath;
     private readonly IReadOnlyList<ProviderDescriptor> _providers;
+    private readonly IEditorKernel? _editor;
 
     /// <summary>
     /// 依赖由组合根显式注入：环境探测在本机执行，目录用于确认 doctor 自身已登记，
@@ -53,13 +55,15 @@ public sealed class DoctorHandler : IOperationHandler
         IOperationCatalog catalog,
         string appVersion,
         string? defaultProjectPath = null,
-        IReadOnlyList<ProviderDescriptor>? providers = null)
+        IReadOnlyList<ProviderDescriptor>? providers = null,
+        IEditorKernel? editor = null)
     {
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _appVersion = appVersion ?? string.Empty;
         _defaultProjectPath = defaultProjectPath ?? string.Empty;
         _providers = providers ?? Array.Empty<ProviderDescriptor>();
+        _editor = editor;
     }
 
     /// <inheritdoc />
@@ -94,7 +98,8 @@ public sealed class DoctorHandler : IOperationHandler
             : request.ProjectPath;
 
         var snapshot = await _probe.ProbeAsync(projectPath, cancellationToken).ConfigureAwait(false);
-        var report = BuildReport(snapshot, out var providerAudit);
+        var (report, providerAudit) = await BuildReportAsync(snapshot, projectPath, cancellationToken)
+            .ConfigureAwait(false);
         var result = new OperationResult<DoctorReport> { Data = report };
 
         var failed = report.Checks.FindAll(check => check.Status == DoctorCheckStatuses.Fail);
@@ -123,7 +128,10 @@ public sealed class DoctorHandler : IOperationHandler
     /// 把探测快照映射为逐项检查。状态汇总只看 fail/warn：
     /// 任一 fail 为 not-ready，仅有 warn 为 degraded，其余为 ready。
     /// </summary>
-    private DoctorReport BuildReport(DoctorEnvironmentSnapshot snapshot, out ProviderAudit providerAudit)
+    private async Task<(DoctorReport Report, ProviderAudit ProviderAudit)> BuildReportAsync(
+        DoctorEnvironmentSnapshot snapshot,
+        string requestedProjectPath,
+        CancellationToken cancellationToken)
     {
         var catalogCount = _catalog.GetAll().Count;
         var doctorRegistered = _catalog.Find(StableOperationId) is not null;
@@ -139,7 +147,7 @@ public sealed class DoctorHandler : IOperationHandler
             ActivityRoot = snapshot.ActivityRoot,
             Providers = new List<ProviderDescriptor>(_providers),
             Unity = new UnityConnectionReport(),
-            Note = "M1 验证应用自身、项目目录、Activity 存储与本地 Workspace Provider；不连接 Unity。"
+            Note = "检查应用自身、项目目录、Activity 存储与真实 Provider；Editor 状态只在 Editor Provider 装配后读取。"
         };
 
         report.Checks.Add(Check(
@@ -181,15 +189,97 @@ public sealed class DoctorHandler : IOperationHandler
                 : "操作目录缺少 " + StableOperationId + "。"));
 
         var providerValidation = ValidateProviders();
-        providerAudit = providerValidation.Audit;
+        var providerAudit = providerValidation.Audit;
         report.Checks.Add(providerValidation.Check);
 
-        // M1 明确跳过 Unity：跳过不等于失败，但也不代表可用。
-        report.Checks.Add(Check(
-            "unity.connection",
-            "Unity 连接",
-            DoctorCheckStatuses.Skipped,
-            report.Unity.Detail));
+        if (_editor is null)
+        {
+            report.Unity = new UnityConnectionReport
+            {
+                Connected = false,
+                Integration = "not-assembled",
+                Detail = "当前组合根未装配 Editor Provider。"
+            };
+            report.Checks.Add(Check(
+                "unity.connection",
+                "Unity 连接",
+                DoctorCheckStatuses.Skipped,
+                report.Unity.Detail));
+        }
+        else
+        {
+            try
+            {
+                var editorStatus = await _editor.GetStatusAsync(
+                    new EditorStatusRequest { ProjectPath = requestedProjectPath },
+                    cancellationToken).ConfigureAwait(false);
+                // ready 只说明“某个 Editor 在线”；必须同时确认它挂载的是请求项目，
+                // 否则多开 Editor 或默认项目会把别的编辑器误报成当前项目已连接。
+                var projectMatches = EditorProjectMatch.Matches(
+                    requestedProjectPath,
+                    editorStatus.ProjectPath);
+                var connected = string.Equals(editorStatus.State, "ready", StringComparison.Ordinal)
+                    && projectMatches;
+                report.Unity = new UnityConnectionReport
+                {
+                    Connected = connected,
+                    Integration = editorStatus.State,
+                    Detail = BuildEditorDetail(editorStatus, requestedProjectPath, projectMatches)
+                };
+                report.Checks.Add(Check(
+                    "unity.connection",
+                    "Unity 连接",
+                    connected ? DoctorCheckStatuses.Pass : DoctorCheckStatuses.Warn,
+                    report.Unity.Detail));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (TimeoutException exception)
+            {
+                // 超时是稳定状态而不是通用失败：保留 integration=timeout 供调用方区分重试。
+                report.Unity = new UnityConnectionReport
+                {
+                    Connected = false,
+                    Integration = "timeout",
+                    Detail = "Editor 状态查询超时：" + exception.Message
+                };
+                report.Checks.Add(Check(
+                    "unity.connection",
+                    "Unity 连接",
+                    DoctorCheckStatuses.Fail,
+                    report.Unity.Detail));
+            }
+            catch (EditorException exception)
+            {
+                report.Unity = new UnityConnectionReport
+                {
+                    Connected = false,
+                    Integration = "error",
+                    Detail = exception.Code + ": " + exception.Message
+                };
+                report.Checks.Add(Check(
+                    "unity.connection",
+                    "Unity 连接",
+                    DoctorCheckStatuses.Fail,
+                    report.Unity.Detail));
+            }
+            catch (NotSupportedException)
+            {
+                report.Unity = new UnityConnectionReport
+                {
+                    Connected = false,
+                    Integration = "not-supported",
+                    Detail = "Editor Provider 不支持状态查询。"
+                };
+                report.Checks.Add(Check(
+                    "unity.connection",
+                    "Unity 连接",
+                    DoctorCheckStatuses.Skipped,
+                    report.Unity.Detail));
+            }
+        }
 
         if (report.Checks.Exists(check => check.Status == DoctorCheckStatuses.Fail))
         {
@@ -204,7 +294,38 @@ public sealed class DoctorHandler : IOperationHandler
             report.State = DoctorStates.Ready;
         }
 
-        return report;
+        return (report, providerAudit);
+    }
+
+    private static string BuildEditorDetail(
+        EditorStatus status,
+        string requestedProjectPath,
+        bool projectMatches)
+    {
+        var detail = "state=" + status.State;
+        if (!projectMatches)
+        {
+            detail += string.IsNullOrWhiteSpace(status.ProjectPath)
+                ? "; projectPath=<empty>（Provider 未报告项目，无法确认连接属于当前项目）"
+                : "; projectPath=" + status.ProjectPath + "（与请求项目 " + requestedProjectPath + " 不一致）";
+        }
+
+        if (!string.IsNullOrWhiteSpace(status.UnityVersion))
+        {
+            detail += "; unity=" + status.UnityVersion;
+        }
+
+        if (status.ProcessId is int processId)
+        {
+            detail += "; pid=" + processId.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (!string.IsNullOrWhiteSpace(status.Message))
+        {
+            detail += "; " + status.Message;
+        }
+
+        return detail;
     }
 
     /// <summary>

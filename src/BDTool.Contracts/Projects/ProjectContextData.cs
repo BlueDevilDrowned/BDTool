@@ -22,12 +22,18 @@ namespace BDTool.Contracts.Projects
         public ProjectActivityLimits ActivityLimits { get; set; } = new ProjectActivityLimits();
     }
 
-    /// <summary>M1 Editor 占位。禁止在没有真实连接时把 Connected 设为 true。</summary>
+    /// <summary>
+    /// Editor 的可观察状态。只有在真实 Provider 报告 ready 时 Connected 才能为 true；
+    /// ProviderId、进程号与 Unity 版本来自公开描述，不伪造场景内容。
+    /// </summary>
     public sealed class ProjectEditorContext
     {
         public bool Connected { get; set; }
         public string Status { get; set; } = "not-connected";
         public string Message { get; set; } = string.Empty;
+        public string ProviderId { get; set; } = string.Empty;
+        public string? UnityVersion { get; set; }
+        public int? ProcessId { get; set; }
     }
 
     /// <summary>项目上下文公开的 Activity 限制。</summary>

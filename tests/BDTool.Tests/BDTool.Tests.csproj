@@ -31,6 +31,7 @@
     <ProjectReference Include="..\..\src\BDTool.Application\BDTool.Application.csproj" />
     <ProjectReference Include="..\..\src\BDTool.Composition\BDTool.Composition.csproj" />
     <ProjectReference Include="..\..\src\BDTool.Cli\BDTool.Cli.csproj" />
+    <ProjectReference Include="..\..\src\BDTool.Provider.Akio\BDTool.Provider.Akio.csproj" />
   </ItemGroup>
 
 </Project>

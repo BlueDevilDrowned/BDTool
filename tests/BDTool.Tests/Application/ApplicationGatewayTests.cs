@@ -171,6 +171,29 @@ public sealed class ApplicationGatewayTests
     }
 
     [Fact]
+    public async Task CapabilitySnapshot_OnlyReportsSoleProviderId()
+    {
+        var catalog = new StubCatalog(Descriptor("system.doctor"));
+        var handlers = new OperationHandlerRegistry();
+
+        var none = await new CatalogCapabilityInspector(catalog, handlers)
+            .GetAsync(CancellationToken.None);
+        Assert.Equal(string.Empty, none.ProviderId);
+
+        var local = Provider();
+        local.Id = "local";
+        var one = await new CatalogCapabilityInspector(catalog, handlers, new[] { local })
+            .GetAsync(CancellationToken.None);
+        Assert.Equal("local", one.ProviderId);
+
+        var editor = Provider();
+        editor.Id = "akio";
+        var multiple = await new CatalogCapabilityInspector(catalog, handlers, new[] { local, editor })
+            .GetAsync(CancellationToken.None);
+        Assert.Equal(string.Empty, multiple.ProviderId);
+    }
+
+    [Fact]
     public async Task MissingRequiredCapability_ReturnsCapabilityUnsupportedAndExitCodeThree()
     {
         var descriptor = Descriptor("workspace.read", implemented: true);
@@ -316,6 +339,67 @@ public sealed class ApplicationGatewayTests
         var record = Assert.Single(sink.Records);
         Assert.Equal(ErrorCodes.PreconditionFailed, record.Error!.Code);
         Assert.Equal(5, record.ExitCode);
+    }
+
+    [Fact]
+    public async Task HandlerEditorException_PreservesCodeDetailsAndEditorStage()
+    {
+        var descriptor = Descriptor("system.doctor", implemented: true);
+        var exception = new EditorException(
+            ErrorCodes.PreconditionFailed,
+            "Editor 项目不匹配。",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["reason"] = "project-mismatch"
+            });
+        var registry = new OperationHandlerRegistry().Register(
+            new EditorThrowingHandler("system.doctor", exception));
+        var sink = new StubActivitySink();
+        var gateway = CreateGateway(
+            descriptor,
+            registry,
+            new StubContextFactory(),
+            sink,
+            capabilities: new EmptyCapabilityInspector());
+
+        var result = await gateway.ExecuteAsync(Request("system.doctor"), Activity(), CancellationToken.None);
+
+        Assert.Equal(OperationStatus.Failed, result.Status);
+        Assert.Equal(ErrorCodes.PreconditionFailed, result.Errors[0].Code);
+        Assert.Equal("editor", result.Errors[0].Stage);
+        Assert.Equal("project-mismatch", result.Errors[0].Details["reason"]);
+        Assert.Equal(CliExitCode.ExecutionFailed, ExitCodePolicy.Map(result));
+
+        var record = Assert.Single(sink.Records);
+        Assert.Equal(ErrorCodes.PreconditionFailed, record.Error!.Code);
+        Assert.Equal("editor", record.Error.Stage);
+        Assert.Equal(5, record.ExitCode);
+    }
+
+    [Fact]
+    public async Task HandlerEditorCancelled_MapsToCancelledStatusAndExitCode()
+    {
+        var descriptor = Descriptor("system.doctor", implemented: true);
+        var registry = new OperationHandlerRegistry().Register(
+            new EditorThrowingHandler(
+                "system.doctor",
+                new EditorException(ErrorCodes.Cancelled, "Editor 操作已取消。")));
+        var sink = new StubActivitySink();
+        var gateway = CreateGateway(
+            descriptor,
+            registry,
+            new StubContextFactory(),
+            sink,
+            capabilities: new EmptyCapabilityInspector());
+
+        var result = await gateway.ExecuteAsync(Request("system.doctor"), Activity(), CancellationToken.None);
+
+        Assert.Equal(OperationStatus.Cancelled, result.Status);
+        Assert.Equal(ErrorCodes.Cancelled, result.Errors[0].Code);
+        Assert.Equal(CliExitCode.Cancelled, ExitCodePolicy.Map(result));
+        var record = Assert.Single(sink.Records);
+        Assert.Equal(OperationStatus.Cancelled, record.Status);
+        Assert.Equal(7, record.ExitCode);
     }
 
     [Theory]
@@ -883,6 +967,25 @@ public sealed class ApplicationGatewayTests
                 {
                     ["expectedSha256"] = "abc123"
                 });
+    }
+
+    /// <summary>模拟 Provider 已转换的 Editor 失败；网关必须原样保留错误码与详情。</summary>
+    private sealed class EditorThrowingHandler : IOperationHandler
+    {
+        private readonly EditorException _exception;
+
+        public EditorThrowingHandler(string operationId, EditorException exception)
+        {
+            OperationId = operationId;
+            _exception = exception;
+        }
+
+        public string OperationId { get; }
+
+        public Task<OperationResult> ExecuteAsync(
+            OperationRequest request,
+            IOperationContext context,
+            CancellationToken cancellationToken) => throw _exception;
     }
 
     private sealed class EmptyCapabilityInspector : ICapabilityInspector

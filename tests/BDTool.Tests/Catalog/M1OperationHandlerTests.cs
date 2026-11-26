@@ -36,7 +36,7 @@ public sealed class M1OperationHandlerTests
     private static IOperationCatalog Catalog() => OperationCatalogLoader.Load(RepoPaths.CatalogFile);
 
     [Fact]
-    public async Task OperationsList_ReturnsTypedEightOperationSummaries()
+    public async Task OperationsList_ReturnsTypedTenOperationSummaries()
     {
         var handler = new OperationsListHandler(Catalog());
 
@@ -47,9 +47,17 @@ public sealed class M1OperationHandlerTests
 
         var typed = Assert.IsType<OperationResult<OperationsListData>>(result);
         Assert.Equal(OperationStatus.Completed, typed.Status);
-        Assert.Equal(8, typed.Data.Operations.Count);
+        Assert.Equal(10, typed.Data.Operations.Count);
         Assert.Contains(typed.Data.Operations, item => item.Id == "workspace.apply" && item.Implemented);
-        Assert.All(typed.Data.Operations, item => Assert.Equal("M1", item.Milestone));
+        Assert.Contains(
+            typed.Data.Operations,
+            item => item.Id == "project.inspect" && item.Milestone == "M2");
+        Assert.Contains(
+            typed.Data.Operations,
+            item => item.Id == "project.probe"
+                    && item.Milestone == "M2"
+                    && item.Implemented
+                    && item.Availability == "available");
     }
 
     [Fact]

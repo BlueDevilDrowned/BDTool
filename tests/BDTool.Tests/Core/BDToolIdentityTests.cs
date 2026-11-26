@@ -5,15 +5,15 @@ namespace BDTool.Tests.Core;
 
 /// <summary>
 /// 产品身份与里程碑的单一来源约束：CLI --version、Doctor 报告与 Core 常量
-/// 必须一致；M1 只提升里程碑，产品版本仍保留 0.1.0。
+/// 必须一致；M2 完成时产品版本与里程碑同步提升。
 /// </summary>
 public sealed class BDToolIdentityTests
 {
     [Fact]
-    public void Milestone_IsM1_AndProductVersionRemainsZeroOneZero()
+    public void Milestone_IsM2_AndProductVersionIsZeroTwoZero()
     {
-        Assert.Equal("M1", BDToolIdentity.Milestone);
-        Assert.Equal("0.1.0", BDToolIdentity.Version);
+        Assert.Equal("M2", BDToolIdentity.Milestone);
+        Assert.Equal("0.2.0", BDToolIdentity.Version);
         Assert.Equal(BDToolIdentity.Milestone, DoctorHandler.CurrentMilestone);
     }
 }

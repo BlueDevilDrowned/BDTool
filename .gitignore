@@ -16,6 +16,7 @@ UserSettings/
 # IDE 与本地环境
 .vs/
 .idea/
+.tools/
 *.user
 *.suo
 *.DotSettings.user

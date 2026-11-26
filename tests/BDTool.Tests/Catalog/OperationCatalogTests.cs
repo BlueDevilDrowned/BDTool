@@ -13,7 +13,7 @@ namespace BDTool.Tests.Catalog;
 public sealed class OperationCatalogTests
 {
     [Fact]
-    public void RealCatalog_ContainsEightAvailableM1Operations()
+    public void RealCatalog_ContainsTenAvailableM1AndM2Operations()
     {
         var catalog = OperationCatalogLoader.Load(RepoPaths.CatalogFile);
         var descriptors = catalog.GetAll();
@@ -24,6 +24,8 @@ public sealed class OperationCatalogTests
                 "operations.describe",
                 "operations.list",
                 "project.context",
+                "project.inspect",
+                "project.probe",
                 "system.doctor",
                 "workspace.apply",
                 "workspace.fingerprint",
@@ -32,16 +34,60 @@ public sealed class OperationCatalogTests
             },
             descriptors.Select(item => item.Id).OrderBy(id => id, StringComparer.Ordinal));
 
-        // M1 的八个操作全部有真实 Handler；目录不得保留“已实现但 planned”或反向漂移。
+        // 十个操作都必须有真实 Handler；M2 的 inspect/probe 接线后不得再保留 planned。
         foreach (var descriptor in descriptors)
         {
             Assert.True(descriptor.Implemented, descriptor.Id + " 必须标记 implemented。");
             Assert.Equal(OperationAvailability.Available, descriptor.Availability);
-            Assert.Equal("M1", descriptor.Milestone);
+            Assert.Contains(descriptor.Milestone, new[] { "M1", "M2" });
         }
+
+        Assert.Equal(
+            "M2",
+            Assert.Single(descriptors, item => item.Id == "project.inspect").Milestone);
+
+        var probe = Assert.Single(descriptors, item => item.Id == "project.probe");
+        Assert.Equal("M2", probe.Milestone);
+        Assert.True(probe.Implemented);
+        Assert.Equal(OperationAvailability.Available, probe.Availability);
 
         var doctor = Assert.Single(descriptors, item => item.Id == "system.doctor");
         Assert.Equal(OperationEffects.Read, doctor.Effect);
+    }
+
+    [Fact]
+    public void RealCatalog_ProjectProbeDeclaresStrictEmptyInputAndTypedSnapshot()
+    {
+        var catalog = OperationCatalogLoader.Load(RepoPaths.CatalogFile);
+        var probe = Assert.Single(catalog.GetAll(), item => item.Id == "project.probe");
+
+        Assert.Equal(OperationEffects.Read, probe.Effect);
+        Assert.Equal(new[] { "editor" }, probe.Environment);
+        Assert.Equal(
+            new[] { CapabilityIds.EditorStatus, CapabilityIds.EditorToolRead },
+            probe.RequiredCapabilities);
+        Assert.Equal("M2", probe.Milestone);
+        Assert.True(probe.Implemented);
+        Assert.Equal(OperationAvailability.Available, probe.Availability);
+
+        using var input = JsonDocument.Parse(probe.InputSchemaJson);
+        Assert.False(input.RootElement.GetProperty("additionalProperties").GetBoolean());
+        Assert.Empty(input.RootElement.GetProperty("properties").EnumerateObject());
+
+        using var result = JsonDocument.Parse(probe.ResultSchemaJson);
+        var required = result.RootElement.GetProperty("properties")
+            .GetProperty("data")
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(item => item.GetString())
+            .ToArray();
+        Assert.Equal(
+            new[]
+            {
+                "product", "unityVersion", "platform", "sceneName", "scenePath",
+                "sceneIsDirty", "rootObjectCount", "observedAtUtc"
+            }.OrderBy(name => name, StringComparer.Ordinal),
+            required.OrderBy(name => name, StringComparer.Ordinal));
     }
 
     [Fact]
@@ -133,6 +179,14 @@ public sealed class OperationCatalogTests
             ["operations.list"] = (Array.Empty<string>(), Array.Empty<string>()),
             ["operations.describe"] = (new[] { "operationId" }, new[] { "operationId" }),
             ["project.context"] = (Array.Empty<string>(), Array.Empty<string>()),
+            ["project.inspect"] = (
+                Array.Empty<string>(),
+                new[]
+                {
+                    "rootPath", "includeComponents", "includeInactive", "includeLayers",
+                    "includeTags", "includeTransform", "maxDepth", "maxObjects", "nameOnly"
+                }),
+            ["project.probe"] = (Array.Empty<string>(), Array.Empty<string>()),
             ["workspace.read"] = (new[] { "relativePath" }, new[] { "relativePath" }),
             ["workspace.search"] = (
                 new[] { "query" },

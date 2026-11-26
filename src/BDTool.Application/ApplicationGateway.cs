@@ -10,6 +10,7 @@ using BDTool.Contracts;
 using BDTool.Contracts.Activity;
 using BDTool.Contracts.Artifacts;
 using BDTool.Contracts.Capabilities;
+using BDTool.Contracts.Editor;
 using BDTool.Contracts.Errors;
 using BDTool.Contracts.Gateway;
 using BDTool.Contracts.Operations;
@@ -219,8 +220,9 @@ public sealed class ApplicationGateway : IApplicationGateway
         var effectiveSeconds = Math.Min((long)requestedTimeout, (long)catalogTimeout);
         effectiveSeconds = Math.Clamp(effectiveSeconds, 1L, MaxCancellationDelaySeconds);
 
-        // 到这里 Handler 将被真实调用，Activity 记录的 ProviderId 才代表实际执行方。
-        var providerId = _executionProviderId;
+        // 到这里 Handler 将被真实调用。按目录声明能力选择实际 Provider，
+        // 不根据品牌 ID 或操作字符串分支。
+        var providerId = ResolveExecutionProviderId(descriptor);
 
         using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         executionCts.CancelAfter(TimeSpan.FromSeconds(effectiveSeconds));
@@ -254,6 +256,23 @@ public sealed class ApplicationGateway : IApplicationGateway
             return (Failure(
                 exception.Code,
                 "workspace",
+                exception.Message,
+                exception.Details.Count == 0
+                    ? null
+                    : new Dictionary<string, string>(exception.Details, StringComparer.Ordinal),
+                string.Equals(exception.Code, ErrorCodes.Cancelled, StringComparison.Ordinal)
+                    ? OperationStatus.Cancelled
+                    : OperationStatus.Failed),
+                providerId);
+        }
+        catch (EditorException exception)
+        {
+            // Provider 已把上游进程失败转换为稳定错误码；网关必须保留 Code/Details，
+            // 否则调用方无法区分“编辑器未就绪 / 工具缺失 / 上游工具失败”，
+            // 也会让 Editor 的失败语义被折叠成统一的 EXECUTION_FAILED。
+            return (Failure(
+                exception.Code,
+                "editor",
                 exception.Message,
                 exception.Details.Count == 0
                     ? null
@@ -448,6 +467,25 @@ public sealed class ApplicationGateway : IApplicationGateway
             Message = message,
             Details = details ?? new Dictionary<string, string>()
         });
+    }
+
+    /// <summary>
+    /// 优先选择能声明全部必需能力的 Provider；没有能力要求时使用组合根默认值。
+    /// 多个 Provider 同时满足时保持 Composition 输入顺序，避免隐式优先级。
+    /// </summary>
+    private string ResolveExecutionProviderId(OperationDescriptor descriptor)
+    {
+        if (_providers.Count == 0)
+        {
+            return _executionProviderId;
+        }
+
+        var candidates = _providers.Where(provider =>
+            descriptor.RequiredCapabilities.All(required =>
+                provider.Capabilities.TryGetValue(required, out var available) && available));
+        var preferred = candidates.FirstOrDefault(provider =>
+            provider.Kind is not null && descriptor.Environment.Contains(provider.Kind));
+        return preferred?.Id ?? _executionProviderId;
     }
 
     private static OperationResult Unsupported(string operationId, string reason, string milestone)

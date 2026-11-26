@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using BDTool.Contracts.Providers;
 
 namespace BDTool.Operations.Diagnostics;
@@ -13,7 +15,7 @@ public static class DoctorCheckStatuses
     public const string Warn = "warn";
     public const string Fail = "fail";
 
-    /// <summary>按设计明确跳过，不视为失败；例如 M1 不连接 Unity。</summary>
+    /// <summary>按设计明确跳过，不视为失败；例如未装配 Editor Provider 或 Provider 不支持状态查询。</summary>
     public const string Skipped = "skipped";
 }
 
@@ -26,8 +28,8 @@ public static class DoctorStates
 }
 
 /// <summary>
-/// M1 doctor 的 typed 结果。描述应用自身、项目目录、存储环境与 Provider 快照；
-/// Unity 连接状态固定为未连接，禁止据此推断任何 Unity 兼容性。
+/// doctor 的 typed 结果。描述应用自身、项目目录、存储环境、Provider 与真实
+/// Editor 状态；未装配 Editor Provider 时明确标为未连接。
 /// </summary>
 public sealed class DoctorReport
 {
@@ -58,12 +60,55 @@ public sealed class DoctorCheck
 }
 
 /// <summary>
-/// Unity 连接报告。M1 固定 Connected=false；Editor Provider 属于后续里程碑，
-/// 任何“可用”声明都必须等真实项目与 Editor 验证。
+/// Unity 连接报告。只有真实 Provider 报告 ready、且报告的项目路径与请求项目一致时，
+/// 才允许 Connected=true；未装配、超时或路径不一致都必须保持未连接。
 /// </summary>
 public sealed class UnityConnectionReport
 {
     public bool Connected { get; set; }
-    public string Integration { get; set; } = "not-implemented";
-    public string Detail { get; set; } = "M1 不连接 Unity；Editor Provider 尚未实现。";
+    public string Integration { get; set; } = "not-assembled";
+    public string Detail { get; set; } = "当前组合根未装配 Editor Provider。";
+}
+
+/// <summary>
+/// Editor 报告的项目路径与请求项目是否指向同一目录。任一侧为空都视为不匹配：
+/// “无法确认”不能当成“已连接”，否则多开 Editor 或上游省略字段时会误报。
+/// Windows 路径大小写不敏感，其他平台按序数比较；末尾分隔符与相对路径先规范化。
+/// </summary>
+internal static class EditorProjectMatch
+{
+    public static bool Matches(string? requestedProjectPath, string? reportedProjectPath)
+    {
+        if (string.IsNullOrWhiteSpace(requestedProjectPath)
+            || string.IsNullOrWhiteSpace(reportedProjectPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            return string.Equals(
+                Normalize(requestedProjectPath),
+                Normalize(reportedProjectPath),
+                comparison);
+        }
+        catch (Exception)
+        {
+            // 非法/超长路径无法证明是同一项目，按不匹配处理，由上层给出可见诊断。
+            return false;
+        }
+    }
+
+    /// <summary>转成绝对路径并去掉末尾分隔符，但保留盘符根（如 C:\）。</summary>
+    private static string Normalize(string path)
+    {
+        var full = Path.GetFullPath(path.Trim());
+        var root = Path.GetPathRoot(full) ?? string.Empty;
+        return full.Length > root.Length
+            ? full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            : full;
+    }
 }

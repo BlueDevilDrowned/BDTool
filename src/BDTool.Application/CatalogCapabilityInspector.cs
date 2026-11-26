@@ -46,8 +46,8 @@ public sealed class CatalogCapabilityInspector : ICapabilityInspector
         {
             foreach (var capability in provider.Capabilities)
             {
-                // 多 Provider 上报同名能力时任一显式可用即视为可用；本轮仍是单 Provider
-                // 扁平快照，能力来源归属不在本实现范围内。
+                // 多 Provider 上报同名能力时任一显式可用即视为可用；扁平快照无法表达
+                // 单个能力的归属，因此多 Provider 时 ProviderId 留空，避免谎报。
                 providerCapabilities[capability.Key] =
                     providerCapabilities.TryGetValue(capability.Key, out var existingReported)
                         ? existingReported || capability.Value
@@ -98,7 +98,9 @@ public sealed class CatalogCapabilityInspector : ICapabilityInspector
 
         var snapshot = new CapabilitySnapshot
         {
-            ProviderId = _providers.Count > 0 ? _providers[0].Id : string.Empty,
+            // 只有一个 Provider 时保留 M1 行为；零个为未知，多个则没有单一归属，
+            // 都不能把第一个 Provider 当成整体身份。
+            ProviderId = _providers.Count == 1 ? _providers[0].Id : string.Empty,
             ContractVersion = BDToolContract.Version,
             Capabilities = capabilities,
             Limits = limits

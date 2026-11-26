@@ -44,8 +44,8 @@ public sealed class CliEntrypointTests
         var data = root.GetProperty("data");
         Assert.Equal(JsonValueKind.Object, data.ValueKind);
         Assert.Equal("ready", data.GetProperty("state").GetString());
-        Assert.Equal("M1", data.GetProperty("milestone").GetString());
-        Assert.Equal("0.1.0", data.GetProperty("appVersion").GetString());
+        Assert.Equal("M2", data.GetProperty("milestone").GetString());
+        Assert.Equal("0.2.0", data.GetProperty("appVersion").GetString());
         Assert.Equal(BDToolContract.Version, data.GetProperty("contractVersion").GetString());
         Assert.Equal(Path.GetFullPath(project.ProjectPath), data.GetProperty("projectPath").GetString());
 
@@ -74,7 +74,7 @@ public sealed class CliEntrypointTests
         Assert.Equal("skipped", checks["unity.connection"]);
         var unity = data.GetProperty("unity");
         Assert.False(unity.GetProperty("connected").GetBoolean());
-        Assert.Equal("not-implemented", unity.GetProperty("integration").GetString());
+        Assert.Equal("not-assembled", unity.GetProperty("integration").GetString());
     }
 
     [Fact]
@@ -89,6 +89,26 @@ public sealed class CliEntrypointTests
         Assert.Equal(string.Empty, stderr);
         using var document = JsonDocument.Parse(stdout);
         Assert.Equal("ready", document.RootElement.GetProperty("data").GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task Doctor_ExplicitMissingUnityCli_StaysOfflineWithoutFallback()
+    {
+        using var project = new TemporaryProjectDirectory();
+
+        var (exitCode, stdout, stderr) = await RunRawAsync(
+            "doctor",
+            "--unity-cli",
+            MissingUnityCliPath,
+            "--project",
+            project.ProjectPath);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(string.Empty, stderr);
+        using var document = JsonDocument.Parse(stdout);
+        var data = document.RootElement.GetProperty("data");
+        Assert.Equal("ready", data.GetProperty("state").GetString());
+        Assert.Equal("not-assembled", data.GetProperty("unity").GetProperty("integration").GetString());
     }
 
     [Fact]
@@ -184,9 +204,15 @@ public sealed class CliEntrypointTests
         var root = document.RootElement;
         Assert.Equal("completed", root.GetProperty("status").GetString());
         var operations = root.GetProperty("data").GetProperty("operations").EnumerateArray().ToArray();
-        Assert.Equal(8, operations.Length);
+        Assert.Equal(10, operations.Length);
         Assert.Contains(operations, item => item.GetProperty("id").GetString() == "workspace.read");
-        Assert.All(operations, item => Assert.True(item.GetProperty("implemented").GetBoolean()));
+        Assert.All(
+            operations,
+            item => Assert.True(item.GetProperty("implemented").GetBoolean()));
+        var probe = Assert.Single(operations, item => item.GetProperty("id").GetString() == "project.probe");
+        Assert.True(probe.GetProperty("implemented").GetBoolean());
+        Assert.Equal("available", probe.GetProperty("availability").GetString());
+        Assert.Equal("M2", probe.GetProperty("milestone").GetString());
 
         // operations.list 不得在解析阶段直接读取目录而绕过审计。
         using var record = ReadSingleActivity(project);
@@ -500,6 +526,32 @@ public sealed class CliEntrypointTests
         Assert.Equal("INVALID_ARGUMENT", value.RootElement.GetProperty("errors")[0].GetProperty("code").GetString());
     }
 
+    [Theory]
+    [InlineData("--unity-cli")]
+    [InlineData("--unity-editor")]
+    public async Task UnityPathOption_DuplicateOrMissingValue_ReturnsInvalidArgument(string option)
+    {
+        var (missingExit, missingStdout, _) = await RunRawAsync("doctor", option);
+        Assert.Equal(2, missingExit);
+        using (var missing = JsonDocument.Parse(missingStdout))
+        {
+            Assert.Equal("INVALID_ARGUMENT", missing.RootElement.GetProperty("errors")[0].GetProperty("code").GetString());
+        }
+
+        var (duplicateExit, duplicateStdout, _) = await RunRawAsync(
+            "doctor",
+            option,
+            MissingUnityCliPath,
+            option,
+            MissingUnityCliPath);
+        Assert.Equal(2, duplicateExit);
+        using var duplicate = JsonDocument.Parse(duplicateStdout);
+        Assert.Contains(
+            "重复",
+            duplicate.RootElement.GetProperty("errors")[0].GetProperty("message").GetString(),
+            StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ActivityList_Json_ReturnsRecordedOperations()
     {
@@ -591,7 +643,7 @@ public sealed class CliEntrypointTests
         var (exitCode, stdout, stderr) = await RunAsync("--version");
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("bdtool 0.1.0", stdout, StringComparison.Ordinal);
+        Assert.Contains("bdtool 0.2.0", stdout, StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr);
     }
 
@@ -677,11 +729,26 @@ public sealed class CliEntrypointTests
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(params string[] args)
     {
+        // CLI 端到端用例只验收应用与 Workspace 契约；显式指向不存在的 unity-cli，
+        // 防止开发机上的仓库 .tools 或正在运行的 Unity 改变结果。
+        if (args.Length > 0 && !args.Contains("--unity-cli"))
+        {
+            args = args.Concat(new[] { "--unity-cli", MissingUnityCliPath }).ToArray();
+        }
+
+        return await RunRawAsync(args);
+    }
+
+    private static async Task<(int ExitCode, string Stdout, string Stderr)> RunRawAsync(params string[] args)
+    {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
         var exitCode = await CliEntrypoint.RunAsync(args, stdout, stderr, CancellationToken.None);
         return (exitCode, stdout.ToString(), stderr.ToString());
     }
+
+    private static string MissingUnityCliPath =>
+        Path.Combine(Path.GetTempPath(), "bdtool-tests", "missing-unity-cli", "unity-cli.exe");
 
     /// <summary>
     /// 断言非 typed 失败信封中的 data 是存在的空对象。

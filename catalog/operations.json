@@ -3,9 +3,9 @@
   "operations": [
     {
       "id": "system.doctor",
-      "description": "检查 BDTool 自身、项目路径、Provider 与 Activity 存储是否就绪，不连接 Unity。",
+      "description": "检查 BDTool 自身、项目路径、Provider 与 Activity 存储；装配 Editor Provider 时读取真实 Editor 状态。",
       "effect": "read",
-      "environment": ["workspace"],
+      "environment": ["workspace", "editor"],
       "requiredCapabilities": [],
       "inputSchema": {
         "type": "object",
@@ -43,7 +43,7 @@
       "implemented": true,
       "milestone": "M1",
       "availability": "available",
-      "notes": "M1 已注册离线 Handler：输入严格为空对象；检查应用/契约版本、项目与 .bdtool 可写性、Activity 根、目录加载与真实 Provider 快照；不连接 Unity。项目根缺失时跳过审计并告警 AUDIT_UNAVAILABLE_PROJECT_MISSING，不创建目录。"
+      "notes": "输入严格为空对象；检查应用/契约版本、项目与 .bdtool 可写性、Activity 根、目录加载与真实 Provider 快照。Editor Provider 装配后查询真实状态：只有 ready 且报告项目与请求项目一致才 pass；未装配 skipped，超时/Provider 错误分别映射为 timeout/error 并 fail。项目根缺失时跳过审计并告警 AUDIT_UNAVAILABLE_PROJECT_MISSING，不创建目录。"
     },
     {
       "id": "operations.list",
@@ -163,9 +163,9 @@
     },
     {
       "id": "project.context",
-      "description": "返回离线项目路径、存在性、Unity 版本、Editor 连接状态与 Provider 能力。",
+      "description": "返回项目路径、存在性、Unity 版本、Editor 连接状态与 Provider 能力；Editor 仅在 ready 且项目匹配时才算连接。",
       "effect": "read",
-      "environment": ["workspace"],
+      "environment": ["workspace", "editor"],
       "requiredCapabilities": [],
       "inputSchema": {
         "type": "object",
@@ -203,7 +203,124 @@
       "implemented": true,
       "milestone": "M1",
       "availability": "available",
-      "notes": "无 Unity 仍成功；editor.connected=false、status=not-connected。项目缺失返回 PROJECT_NOT_FOUND。"
+      "notes": "无 Unity 仍成功并保持 not-connected；真实 Editor Provider 可用时返回其状态、ProviderId、UnityVersion 与 ProcessId，只有 ready 且项目匹配才 connected。超时映射为 timeout，Provider 错误映射为 error，均不改变外层 Completed。项目缺失返回 PROJECT_NOT_FOUND。"
+    },
+    {
+      "id": "project.inspect",
+      "description": "通过 Editor Provider 读取当前场景名称与只读层级摘要。",
+      "effect": "read",
+      "environment": ["workspace", "editor"],
+      "requiredCapabilities": ["editor.status", "editor.tool.read"],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rootPath": { "type": "string" },
+          "includeComponents": { "type": "boolean" },
+          "includeInactive": { "type": "boolean" },
+          "includeLayers": { "type": "boolean" },
+          "includeTags": { "type": "boolean" },
+          "includeTransform": { "type": "boolean" },
+          "maxDepth": { "type": "integer", "minimum": 0, "maximum": 32 },
+          "maxObjects": { "type": "integer", "minimum": 1, "maximum": 10000 },
+          "nameOnly": { "type": "boolean" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["projectPath", "unityVersion", "sceneName", "isPrefabMode", "objectCount", "hierarchy"],
+            "properties": {
+              "projectPath": { "type": "string" },
+              "unityVersion": { "type": "string" },
+              "sceneName": { "type": "string" },
+              "isPrefabMode": { "type": "boolean" },
+              "objectCount": { "type": "integer" },
+              "hierarchy": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/projectInspectNode" }
+              }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
+        },
+        "$defs": {
+          "projectInspectNode": {
+            "type": "object",
+            "required": ["name", "path", "active", "components", "children"],
+            "properties": {
+              "name": { "type": "string" },
+              "path": { "type": "string" },
+              "active": { "type": "boolean" },
+              "components": { "type": "array", "items": { "type": "string" } },
+              "children": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/projectInspectNode" }
+              }
+            }
+          }
+        }
+      },
+      "timeoutSeconds": 60,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M2",
+      "availability": "available",
+      "notes": "只读调用 unity-cli get_hierarchy；输出转换为 typed 层级，不返回上游原始响应。需要已连接 Editor 与 Bridge 0.19.1。"
+    },
+    {
+      "id": "project.probe",
+      "description": "通过 Editor Provider 的 custom tool 读取项目与当前场景的只读快照。",
+      "effect": "read",
+      "environment": ["editor"],
+      "requiredCapabilities": ["editor.status", "editor.tool.read"],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["product", "unityVersion", "platform", "sceneName", "scenePath", "sceneIsDirty", "rootObjectCount", "observedAtUtc"],
+            "properties": {
+              "product": { "type": "string" },
+              "unityVersion": { "type": "string" },
+              "platform": { "type": "string" },
+              "sceneName": { "type": "string" },
+              "scenePath": { "type": "string" },
+              "sceneIsDirty": { "type": "boolean" },
+              "rootObjectCount": { "type": "integer" },
+              "observedAtUtc": { "type": "string", "format": "date-time" }
+            }
+          },
+          "changedAssets": { "type": "array" },
+          "warnings": { "type": "array" },
+          "errors": { "type": "array" },
+          "artifacts": { "type": "array" },
+          "proof": { "type": "object" },
+          "next": { "type": ["object", "null"] }
+        }
+      },
+      "timeoutSeconds": 30,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M2",
+      "availability": "available",
+      "notes": "输入严格为空对象；产品链路已接入 ProjectProbeHandler，结果收敛为 typed 8 字段 Product/UnityVersion/Platform/SceneName/ScenePath/SceneIsDirty/RootObjectCount/ObservedAtUtc。真实 Unity 6 custom tool 已有直接 CLI 证据，但真实端到端执行仍待验证；只读，不修改场景或资源。"
     },
     {
       "id": "workspace.read",

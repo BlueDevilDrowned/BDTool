@@ -81,13 +81,13 @@ public sealed class CliProcessTests
         var data = root.GetProperty("data");
         Assert.Equal(JsonValueKind.Object, data.ValueKind);
         Assert.Equal("ready", data.GetProperty("state").GetString());
-        Assert.Equal("M1", data.GetProperty("milestone").GetString());
-        Assert.Equal("0.1.0", data.GetProperty("appVersion").GetString());
+        Assert.Equal("M2", data.GetProperty("milestone").GetString());
+        Assert.Equal("0.2.0", data.GetProperty("appVersion").GetString());
 
         // Unity 未接入，进程级报告也必须保持 connected=false / skipped。
         var unity = data.GetProperty("unity");
         Assert.False(unity.GetProperty("connected").GetBoolean());
-        Assert.Equal("not-implemented", unity.GetProperty("integration").GetString());
+        Assert.Equal("not-assembled", unity.GetProperty("integration").GetString());
         var unityCheck = Assert.Single(
             data.GetProperty("checks").EnumerateArray(),
             check => check.GetProperty("id").GetString() == "unity.connection");
@@ -113,15 +113,15 @@ public sealed class CliProcessTests
     }
 
     [Fact]
-    public async Task Version_PrintsProductVersionAndMilestoneM1()
+    public async Task Version_PrintsProductVersionAndMilestoneM2()
     {
         using var project = new TemporaryProjectDirectory();
 
         var result = await RunBdtoolAsync(project.ProjectPath, "--version");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("bdtool 0.1.0", result.Stdout, StringComparison.Ordinal);
-        Assert.Contains("milestone M1", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("bdtool 0.2.0", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("milestone M2", result.Stdout, StringComparison.Ordinal);
         Assert.Equal(string.Empty, result.Stderr);
     }
 

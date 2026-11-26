@@ -15,4 +15,20 @@ public sealed class BDToolCompositionOptions
 
     /// <summary>应用版本，默认取 Core 中冻结的 BDTool 版本。</summary>
     public string AppVersion { get; init; } = BDToolIdentity.Version;
+
+    /// <summary>
+    /// 可选 unity-cli 可执行文件。为空时依次读取 BDTOOL_UNITY_CLI_PATH、
+    /// 当前目录及祖先目录下的 .tools/unity-cli，最后只读 PATH 兜底。
+    /// 显式给出但文件不存在时不静默回退，Editor Provider 保持未装配。
+    /// </summary>
+    public string? UnityCliPath { get; init; }
+
+    /// <summary>
+    /// 可选 Unity Editor 路径，供 unity-cli 启动编辑器时使用；为空时读取
+    /// BDTOOL_UNITY_EDITOR_PATH / UNITY_EDITOR_PATH。只读取环境，不修改 PATH。
+    /// </summary>
+    public string? UnityEditorPath { get; init; }
+
+    /// <summary>Editor 子进程默认超时；必须大于 0。</summary>
+    public int EditorTimeoutMilliseconds { get; init; } = 60_000;
 }
