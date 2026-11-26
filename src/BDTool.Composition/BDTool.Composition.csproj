@@ -13,6 +13,7 @@
     <ProjectReference Include="..\BDTool.Core\BDTool.Core.csproj" />
     <ProjectReference Include="..\BDTool.Operations\BDTool.Operations.csproj" />
     <ProjectReference Include="..\BDTool.Activity\BDTool.Activity.csproj" />
+    <ProjectReference Include="..\BDTool.Orchestration\BDTool.Orchestration.csproj" />
     <ProjectReference Include="..\BDTool.Application\BDTool.Application.csproj" />
     <ProjectReference Include="..\BDTool.Provider.Local\BDTool.Provider.Local.csproj" />
     <ProjectReference Include="..\BDTool.Provider.Akio\BDTool.Provider.Akio.csproj" />

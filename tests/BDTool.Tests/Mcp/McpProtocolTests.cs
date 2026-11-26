@@ -237,7 +237,7 @@ public sealed class McpProtocolTests
         stdout.GetStringBuilder().Clear();
         var versionExit = await McpEntrypoint.RunAsync(new[] { "--version" }, stdout, stderr);
         Assert.Equal(0, versionExit);
-        Assert.Contains("bdtool-mcp 1.1.0", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("bdtool-mcp 1.2.0", stdout.ToString(), StringComparison.Ordinal);
     }
 
     private static async Task<McpClient> CreateClientAsync(

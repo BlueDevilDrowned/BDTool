@@ -1,11 +1,11 @@
 # BDTool
 
-BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool。**M3 已完成并真实验证**：新增只读 `project.asset-snapshot` 与单 Prefab 根对象 activeSelf 写入 `project.prefab-set-active`，目录 12 个操作全部 `available`；已在 Unity `6000.6.0f1` fixture 上跑通资产快照、dry-run、真实写入、stale CAS 拒绝与回滚恢复，Core EditMode 测试 25/25 通过。**M4 已完成**：提供可安装到项目 `.agents/skills` 的 `bdtool-overview` 与 `bdtool-unity-work` Codex Skill，包含防覆盖安装、Agent 使用边界和真实 CLI 验证。**M5 已完成**：新增 `bdtool-mcp` stdio Adapter，把 12 个 catalog 操作映射为高层 MCP Tool，并提供两个只读 Resource 与 Codex/JSON 配置生成。**M6 已完成并真实验证**：新增 `BDTool.Provider.Official`，通过 Unity 官方 `com.unity.pipeline@0.10.0-exp.1` 公共 HTTP API 支持状态、场景层级、Prefab 快照和 activeSelf 写入。
+BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool。**M3 已完成并真实验证**：新增只读 `project.asset-snapshot` 与单 Prefab 根对象 activeSelf 写入 `project.prefab-set-active`，目录 12 个操作全部 `available`；已在 Unity `6000.6.0f1` fixture 上跑通资产快照、dry-run、真实写入、stale CAS 拒绝与回滚恢复，Core EditMode 测试 25/25 通过。**M4 已完成**：提供可安装到项目 `.agents/skills` 的 `bdtool-overview` 与 `bdtool-unity-work` Codex Skill，包含防覆盖安装、Agent 使用边界和真实 CLI 验证。**M5 已完成**：新增 `bdtool-mcp` stdio Adapter，把 12 个 catalog 操作映射为高层 MCP Tool，并提供两个只读 Resource 与 Codex/JSON 配置生成。**M6 已完成并真实验证**：新增 `BDTool.Provider.Official`，通过 Unity 官方 `com.unity.pipeline@0.10.0-exp.1` 公共 HTTP API 支持状态、场景层级、Prefab 快照和 activeSelf 写入。**M7.1 已完成**：新增人工 Formation/Seat/Task/Attempt/Submission/Review/Artifact 持久化、requestId 与载荷 SHA-256 幂等、写入范围校验，以及不写 Activity 的 `bdtool formation` CLI。
 
 ## 当前状态
 
 - 已冻结解决方案、程序集、命名空间与 CLI 可执行名：`BDTool` / `bdtool`。
-- 产品版本 `1.1.0`，里程碑 `M6`；`BDToolIdentity` 与 `Directory.Build.props` 为 `1.1.0`。Akio Editor Provider 行为未变，仍声明实现版本 `0.3.0`。
+- 产品版本 `1.2.0`，里程碑 `M7.1`；`BDToolIdentity` 与 `Directory.Build.props` 为 `1.2.0`。Akio Editor Provider 行为未变，仍声明实现版本 `0.3.0`。
 - 目录共十二个操作：全部已注册 Handler 并标记为 `available`，包括 M1 的 `system.doctor`、`operations.list`、`operations.describe`、`project.context`、`workspace.read`、`workspace.search`、`workspace.fingerprint`、`workspace.apply`，M2 的 `project.inspect`、`project.probe`，以及 M3 的 `project.asset-snapshot`、`project.prefab-set-active`。
 - M4 新增两个项目级 Skill。安装目标固定为 `<project>/.agents/skills/<skill>`；只有带合法 `.bdtool-managed` 标记的目录可被更新，未受管同名目录会使整次安装失败且不写入另一个 Skill。
 - M5 新增 `BDTool.Mcp`，可执行名为 `bdtool-mcp`。MCP 工具直接来自 catalog，输入/输出 Schema 与 CLI 相同；调用统一进入 Application Gateway，并写 `source=mcp` 的 Activity。
@@ -19,6 +19,8 @@ BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace P
 - M4 已验证首次安装、二次更新、冲突防覆盖、默认 JSON 信封、发布目录 references 复制与 Codex 实际发现/触发边界；安装不会创建 `.bdtool` Activity。
 - M5 已用官方 `ModelContextProtocol` SDK 客户端启动真实 stdio 子进程，验证 12 个工具、2 个 Resource、参数转发与 `project.context`/Activity，以及同一 `workspace.fingerprint` 请求在 CLI/MCP 返回相同结果信封。
 - M6 已在隔离 Unity `6000.6.0f1` 项目验证官方状态、场景层级、Prefab 快照、dry-run、真实 activeSelf 写入、保存回读和 stale CAS；Akio 专属 `project.probe` 在 Official Provider 上明确返回 `CAPABILITY_UNSUPPORTED`。
+- M7.1 状态文件位于 `<project>/.bdtool/state/formations/<formationId>.json`，使用独占锁和原子替换；同一 `requestId` 只有在命令、实体与规范化载荷 SHA-256 全部一致时才重放。
+- M7.1 人工流程为 `Ready → DispatchRequested → ManualInProgress → Submitted → Passed|NeedsRework`；人工路径永不进入 `Running`，`AgentId`/`SessionId` 保持为空。`formation` mutation 不创建 Activity。
 
 ## 目录
 
@@ -32,6 +34,7 @@ src/BDTool.Core             不依赖外部系统的领域规则（路径策略�
 src/BDTool.Operations       目录加载/校验、输入解析与十二个 Handler（含 M3 Projects）
 src/BDTool.Activity         Activity 存储与脱敏策略
 src/BDTool.Application      用例运行时、能力检查、超时与退出码映射
+src/BDTool.Orchestration    Formation 文件仓储、人工状态机与范围校验
 src/BDTool.Provider.Local   本地 Workspace Provider（仅依赖 Contracts/Core）
 src/BDTool.Provider.Akio    可选 unity-cli 只读 Editor Provider（仅依赖 Contracts）
 src/BDTool.Provider.Official 官方 com.unity.pipeline Editor Provider（仅依赖 Contracts）
@@ -39,7 +42,7 @@ src/BDTool.Composition      唯一组合根
 src/BDTool.Cli              bdtool 可执行入口
 src/BDTool.Mcp              bdtool-mcp stdio MCP Adapter
 tests/BDTool.Tests          单元、组合、CLI、MCP 与架构测试
-docs/decisions              决策记录（0001-0009）
+docs/decisions              决策记录（0001-0010）
 ```
 
 ## 构建与测试
@@ -73,6 +76,9 @@ bdtool workspace.fingerprint --input-json '{"relativePaths":["Assets/a.txt"]}'
 bdtool skills install [--project <path>] [--scope project] [--human] [--json]
 bdtool activity list [--project <path>]
 bdtool activity show <activityId> [--project <path>]
+bdtool formation create --id <id> --objective <text> --request-id <id|auto> [--project <path>]
+bdtool formation show <id> [--include-receipts] [--project <path>] [--human]
+bdtool formation list [--project <path>] [--human]
 bdtool --version | --help
 ```
 
@@ -176,6 +182,30 @@ bdtool run project.asset-snapshot --project <项目路径> --editor-provider off
 - `project.probe` 明确返回 `CAPABILITY_UNSUPPORTED`/退出码 `3`，未 fallback 到 Akio。
 - Activity 记录 `providerId=official` 与实际操作和 changedAssets。
 
+## M7.1 人工编队（已完成）
+
+M7.1 只实现人工或 Coordinator 逐项推进，不创建 Codex 子智能体，也不绑定独立 Session。完整命令：
+
+```text
+bdtool formation create ...
+bdtool formation seat add ...
+bdtool formation task create ...
+bdtool formation task dispatch|start|submit|review|rework|cancel ...
+bdtool formation cancel|archive ...
+bdtool formation show|list ...
+```
+
+- 所有 mutation 要求 `--request-id`，也接受 `auto` 并在 `data.requestId` 回显实际值。
+- 声明 `--write-path` 而未给 `--access` 时按 `write` 处理；`--role` 大小写不敏感并归一化为 `Executor`/`Reviewer`/`Coordinator`。
+- 状态文件默认隐藏 `requestReceipts`；仅 `show --include-receipts` 显式返回。
+- `changedPaths` 必须位于任务写入范围；席位和活动任务写入范围不能重叠，Windows 比较忽略大小写。
+- `../`、项目外绝对路径、ADS、Windows 保留设备名、reparse point 与 `.bdtool` 内部目录作为写范围时均拒绝。
+- 失败审核必须带返工要求；只能审核最新 Submission，历史 Submission 和重复审核均拒绝。
+- 达到 `reviewRetryMax` 后将任务与 Formation 标记为 `Blocked`，原因固定为 `REVIEW_RETRY_EXCEEDED`。
+- Formation 状态与 review 历史原子持久化；损坏 JSON 返回 `FORMATION_STATE_CORRUPT`，未知 Schema 返回 `FORMATION_STATE_UNSUPPORTED`，均不覆盖原文件。
+
+M7.2 原生子智能体和 M7.3 独立 Session 尚未在 M7.1 阶段实现；M7.4 跨实例仍明确不支持。完成条件与限制详见 [0010](docs/decisions/0010-bdtool-m7-1-formation.md)。
+
 ## M5 MCP Adapter（已完成）
 
 ### 工具与 Resource
@@ -275,15 +305,16 @@ bdtool-mcp config --project <项目路径> --format codex
 
 ## 明确限制
 
-- M2 已完成范围为可选的 `unity-cli` 只读 Editor 能力（状态、层级与 custom probe 快照）；M3 已完成并真实验证单 Prefab 根对象 activeSelf 写入与资产快照；M4 增加项目级 Codex Skill 与安全安装；M5 增加 MCP 映射与配置生成；M6 增加官方 Pipeline Provider，不增加新的 catalog 操作。
+- M2 已完成范围为可选的 `unity-cli` 只读 Editor 能力（状态、层级与 custom probe 快照）；M3 已完成并真实验证单 Prefab 根对象 activeSelf 写入与资产快照；M4 增加项目级 Codex Skill 与安全安装；M5 增加 MCP 映射与配置生成；M6 增加官方 Pipeline Provider，不增加新的 catalog 操作；M7.1 增加本地人工 Formation，不创建或伪造 Agent/Session。
 - M3 不包含 multi-asset、bulk、场景写入、播放模式或全部 Unity 工具；`project.prefab-set-active` 只接受单个 `assetPath`。
 - M4 Skill 安装只支持项目级 `.agents/skills`，不做用户级安装、全局 Skill 替换或自动修改 Codex 配置。
 - M5 MCP 只实现 stdio，不提供 HTTP transport、MCP Prompt、资源订阅或低层 Editor 工具；MCP Resource 当前为固定 URI，不提供服务端资源变更通知。
 - M6 Official Provider 依赖 Unity 官方 `com.unity.pipeline` 的公开实例描述与 HTTP 命令 API，不修改或再分发官方包。
+- M7.1 不提供原生子智能体派发、独立 Session、跨实例调度或自动递归；这些分别属于 M7.2、M7.3、M7.4。
 - Official 写入通过固定的 `script eval` 脚本完成，不宣称 Unity Undo；结果中 `undoGroup` 为空，保存、强制导入、回读与磁盘 SHA 仍为完成证据。
 - Akio 专属 `project.probe` 在 Official Provider 上明确返回 `CAPABILITY_UNSUPPORTED`；不跨 Provider fallback。
 - 真实 Unity 6 验证使用 `E:\AI\BDTools\M2TestArea`（M2）与 `E:\AI\BDTools\M3TestArea\Unity6Fixture`（M3）fixture，原 TTF2 未修改；验证依赖本机 `unity-cli`/bridge。
 - 未安装 `unity-cli` 或 Editor 未就绪时，Editor 能力返回未就绪/不支持，M1 本地操作不受影响。
 - 不支持二进制写入、流式传输、跨进程强一致 CAS 或 CLI `--timeout` 覆盖；`workspace.apply` 编码后上限 1 MiB。
 - Activity 列表最多返回最近 100 条摘要；不持久化 Started 中间态。
-- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md)、[0005](docs/decisions/0005-bdtool-m2-akio-editor.md)、[0006](docs/decisions/0006-bdtool-m3-unity-core.md)、[0007](docs/decisions/0007-bdtool-m4-skills.md)、[0008](docs/decisions/0008-bdtool-m5-mcp.md) 与 [0009](docs/decisions/0009-bdtool-m6-official-provider.md)。
+- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md)、[0005](docs/decisions/0005-bdtool-m2-akio-editor.md)、[0006](docs/decisions/0006-bdtool-m3-unity-core.md)、[0007](docs/decisions/0007-bdtool-m4-skills.md)、[0008](docs/decisions/0008-bdtool-m5-mcp.md)、[0009](docs/decisions/0009-bdtool-m6-official-provider.md) 与 [0010](docs/decisions/0010-bdtool-m7-1-formation.md)。

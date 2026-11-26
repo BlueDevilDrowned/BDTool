@@ -1,5 +1,6 @@
 using BDTool.Contracts.Gateway;
 using BDTool.Contracts.Activity;
+using BDTool.Contracts.Formation;
 using BDTool.Contracts.Operations;
 using BDTool.Operations.Handlers;
 
@@ -16,6 +17,7 @@ public sealed class BDToolRuntime
         IOperationHandlerRegistry handlers,
         IApplicationGateway gateway,
         IActivityQuery activityQuery,
+        IFormationService formation,
         string projectPath,
         string catalogPath)
     {
@@ -23,6 +25,7 @@ public sealed class BDToolRuntime
         Handlers = handlers;
         Gateway = gateway;
         ActivityQuery = activityQuery;
+        Formation = formation;
         ProjectPath = projectPath;
         CatalogPath = catalogPath;
     }
@@ -41,6 +44,9 @@ public sealed class BDToolRuntime
     /// 不直接构造文件存储，也不感知 Provider 品牌。
     /// </summary>
     public IActivityQuery ActivityQuery { get; }
+
+    /// <summary>M7.1 人工编队服务；CLI 经组合根访问，不直接依赖 Orchestration。</summary>
+    public IFormationService Formation { get; }
 
     /// <summary>解析后的项目路径。</summary>
     public string ProjectPath { get; }

@@ -102,6 +102,15 @@ public static class CliEntrypoint
             return await RunActivityCommandAsync(args, stdout, stderr, cancellationToken).ConfigureAwait(false);
         }
 
+        if (string.Equals(command, "formation", StringComparison.Ordinal))
+        {
+            return await RunFormationCommandAsync(
+                args,
+                stdout,
+                stderr,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         if (string.Equals(command, "operations", StringComparison.Ordinal))
         {
             return await RunOperationsCommandAsync(args, stdout, stderr, cancellationToken).ConfigureAwait(false);
@@ -358,6 +367,42 @@ public static class CliEntrypoint
             WriteResult(failed, options, stdout, stderr);
             return (int)ExitCodePolicy.Map(failed);
         }
+    }
+
+    /// <summary>
+    /// formation 是本地 Application 路由，不进入 Gateway，也不创建 Activity。
+    /// mutation 的 requestId 幂等、状态冲突和退出码统一复用服务结果与 ExitCodePolicy。
+    /// </summary>
+    private static async Task<int> RunFormationCommandAsync(
+        string[] args,
+        TextWriter stdout,
+        TextWriter stderr,
+        CancellationToken cancellationToken)
+    {
+        var parse = FormationCli.Parse(args);
+        if (parse.Error is not null)
+        {
+            return WriteInvalidArgument(parse.Error, InferOutputMode(args), stdout, stderr);
+        }
+
+        var invocation = parse.Invocation!;
+        var runtimeResult = TryCreateRuntime(invocation.RuntimeOptions);
+        if (runtimeResult.Failure is not null)
+        {
+            WriteResult(
+                runtimeResult.Failure,
+                invocation.RuntimeOptions,
+                stdout,
+                stderr);
+            return (int)ExitCodePolicy.Map(runtimeResult.Failure);
+        }
+
+        var result = await FormationCli.ExecuteAsync(
+            invocation,
+            runtimeResult.Runtime!,
+            cancellationToken).ConfigureAwait(false);
+        WriteResult(result, invocation.RuntimeOptions, stdout, stderr);
+        return (int)ExitCodePolicy.Map(result);
     }
 
     private static async Task<int> RunParsedOperationAsync(
@@ -675,9 +720,19 @@ public static class CliEntrypoint
         writer.WriteLine("  bdtool run <id> [--input <file> | --input-json <json>] [--dry-run] [--project <path>] [--editor-provider akio|official] [--unity-cli <exe>] [--human]");
         writer.WriteLine("  bdtool <id> [--input <file> | --input-json <json>] [--project <path>] [--editor-provider akio|official] [--unity-cli <exe>] [--human]");
         writer.WriteLine("  bdtool activity list|show <activityId> [--project <path>] [--human]");
+        writer.WriteLine("  bdtool formation create --id <id> --objective <text> --request-id <id|auto> [--budget-json <json>] [--project <path>] [--human]");
+        writer.WriteLine("  bdtool formation seat add --formation <id> --id <id> --role <role> --display-name <text> [--access read|write --write-path <path>]... --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task create --formation <id> --id <id> --title <text> --objective <text> --instructions <text> --acceptance <text> --executor-seat <id> --reviewer-seat <id> [--access read|write] [--write-path <path>]... --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task dispatch|start|rework|cancel --formation <id> --task <id> --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task submit --formation <id> --task <id> --summary <text> [--changed-path <path>]... --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task review --formation <id> --task <id> --submission <id> --passed|--failed --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation cancel|archive --formation <id> --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation show <id> [--include-receipts] [--project <path>] [--human]");
+        writer.WriteLine("  bdtool formation list [--project <path>] [--human]");
         writer.WriteLine("  bdtool --version | --help");
         writer.WriteLine();
         writer.WriteLine("M6 范围: 本地 Workspace、Akio/Official Editor Provider、项目级 Codex Skill 与 stdio MCP Adapter。");
+        writer.WriteLine("M7.1 范围: 人工编队、席位、任务、提交与审核的本地持久化；formation mutation 不创建 Activity。");
         writer.WriteLine("Akio unity-cli 发现顺序: --unity-cli → BDTOOL_UNITY_CLI_PATH → 当前目录及祖先 .tools/unity-cli → PATH（只读，不改 PATH）。");
         writer.WriteLine();
         writer.WriteLine("退出码:");

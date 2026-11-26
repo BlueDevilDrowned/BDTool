@@ -19,6 +19,7 @@ using BDTool.Operations.Handlers;
 using BDTool.Operations.Operations;
 using BDTool.Operations.Projects;
 using BDTool.Operations.Workspace;
+using BDTool.Orchestration;
 using BDTool.Provider.Local;
 using BDTool.Provider.Akio;
 using BDTool.Provider.Official;
@@ -141,7 +142,15 @@ public static class BDToolComposition
             artifacts: artifactStore,
             executionProviderId: workspaceProvider.Id);
 
-        return new BDToolRuntime(catalog, handlers, gateway, activityStore, projectPath, catalogPath);
+        var formation = new FileFormationService(projectPath);
+        return new BDToolRuntime(
+            catalog,
+            handlers,
+            gateway,
+            activityStore,
+            formation,
+            projectPath,
+            catalogPath);
     }
 
     /// <summary>

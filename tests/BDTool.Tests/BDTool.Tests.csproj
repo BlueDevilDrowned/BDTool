@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\BDTool.Core\BDTool.Core.csproj" />
     <ProjectReference Include="..\..\src\BDTool.Provider.Local\BDTool.Provider.Local.csproj" />
     <ProjectReference Include="..\..\src\BDTool.Operations\BDTool.Operations.csproj" />
+    <ProjectReference Include="..\..\src\BDTool.Orchestration\BDTool.Orchestration.csproj" />
     <ProjectReference Include="..\..\src\BDTool.Activity\BDTool.Activity.csproj" />
     <ProjectReference Include="..\..\src\BDTool.Application\BDTool.Application.csproj" />
     <ProjectReference Include="..\..\src\BDTool.Composition\BDTool.Composition.csproj" />

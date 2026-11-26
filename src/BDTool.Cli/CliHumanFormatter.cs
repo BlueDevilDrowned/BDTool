@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using BDTool.Contracts.Formation;
 using BDTool.Contracts.Operations;
 using BDTool.Contracts.Projects;
 using BDTool.Contracts.Workspace;
@@ -70,11 +71,52 @@ internal static class CliHumanFormatter
                 stdout.WriteLine("dryRun: " + change.Data.DryRun.ToString().ToLowerInvariant());
                 stdout.WriteLine("sha256: " + change.Data.NewSha256);
                 break;
+            case OperationResult<FormationCommandData> { Data: not null } command:
+                stdout.WriteLine("requestId: " + command.Data.RequestId);
+                stdout.WriteLine("replayed: " + command.Data.Replayed.ToString().ToLowerInvariant());
+                WriteFormation(command.Data.Formation, stdout);
+                break;
+            case OperationResult<FormationData> { Data: not null } formation:
+                WriteFormation(formation.Data, stdout);
+                break;
+            case OperationResult<FormationListData> { Data: not null } formations:
+                foreach (var item in formations.Data.Formations)
+                {
+                    stdout.WriteLine(
+                        $"{item.Id}\t{item.Status}\t{item.PassedTaskCount}/{item.TaskCount}\t{item.Objective}");
+                }
+
+                break;
         }
 
         foreach (var error in result.Errors)
         {
             stderr.WriteLine($"bdtool: {error.Code} ({error.Stage}) {error.Message}");
+        }
+    }
+
+    private static void WriteFormation(FormationData formation, TextWriter stdout)
+    {
+        stdout.WriteLine("formation: " + formation.Id);
+        stdout.WriteLine("status: " + formation.Status);
+        stdout.WriteLine("requirementVersion: " + formation.RequirementVersion.ToString(CultureInfo.InvariantCulture));
+        stdout.WriteLine("objective: " + formation.Objective);
+        if (!string.IsNullOrWhiteSpace(formation.BlockedReason))
+        {
+            stdout.WriteLine("blockedReason: " + formation.BlockedReason);
+        }
+
+        foreach (var seat in formation.Seats)
+        {
+            stdout.WriteLine(
+                $"seat: {seat.Id}\t{seat.Role}\t{seat.Workspace.Access}\tactiveTask={seat.ActiveTaskId}");
+        }
+
+        foreach (var task in formation.Tasks)
+        {
+            stdout.WriteLine(
+                $"task: {task.Id}\t{task.State}\tattempts={task.Attempts.Count}\t" +
+                $"submissions={task.Submissions.Count}\treviews={task.Reviews.Count}");
         }
     }
 }

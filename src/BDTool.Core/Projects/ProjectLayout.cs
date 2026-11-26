@@ -42,5 +42,14 @@ public static class ProjectLayout
         return Path.Combine(GetStateRoot(projectPath), "artifacts");
     }
 
+    /// <summary>返回 &lt;project&gt;/.bdtool/state/formations。</summary>
+    public static string GetFormationsRoot(string projectPath)
+    {
+        return Path.Combine(
+            GetStateRoot(projectPath),
+            "state",
+            "formations");
+    }
+
     private const string ActivityPolicyDirectoryName = ".bdtool";
 }
