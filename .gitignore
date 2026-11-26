@@ -1,0 +1,25 @@
+# BDTool 运行期状态与产物（唯一权威路径）
+.bdtool/
+
+# .NET 构建输出
+bin/
+obj/
+TestResults/
+artifacts/
+
+# Unity 工程生成目录（M2+ 才可能出现）
+Library/
+Temp/
+Logs/
+UserSettings/
+
+# IDE 与本地环境
+.vs/
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+
+# 操作系统垃圾文件
+Thumbs.db
+.DS_Store

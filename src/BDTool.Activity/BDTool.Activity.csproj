@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BDTool.Activity</RootNamespace>
+    <AssemblyName>BDTool.Activity</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BDTool.Contracts\BDTool.Contracts.csproj" />
+    <ProjectReference Include="..\BDTool.Core\BDTool.Core.csproj" />
+  </ItemGroup>
+
+</Project>

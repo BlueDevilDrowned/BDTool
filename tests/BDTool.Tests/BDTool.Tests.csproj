@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\catalog\operations.json" Link="catalog\operations.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BDTool.Contracts\BDTool.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\BDTool.Core\BDTool.Core.csproj" />
+    <ProjectReference Include="..\..\src\BDTool.Operations\BDTool.Operations.csproj" />
+    <ProjectReference Include="..\..\src\BDTool.Activity\BDTool.Activity.csproj" />
+    <ProjectReference Include="..\..\src\BDTool.Application\BDTool.Application.csproj" />
+    <ProjectReference Include="..\..\src\BDTool.Composition\BDTool.Composition.csproj" />
+    <ProjectReference Include="..\..\src\BDTool.Cli\BDTool.Cli.csproj" />
+  </ItemGroup>
+
+</Project>

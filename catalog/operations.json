@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "id": "system.doctor",
+      "description": "检查 BDTool 自身、项目路径、Provider 与 Activity 存储是否就绪，不连接 Unity。",
+      "effect": "read",
+      "environment": ["workspace"],
+      "requiredCapabilities": [],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": { "type": "string" },
+          "data": {
+            "type": "object",
+            "required": ["state", "appVersion", "contractVersion", "checks", "providers", "unity"],
+            "properties": {
+              "state": { "type": "string" },
+              "appVersion": { "type": "string" },
+              "contractVersion": { "type": "string" },
+              "checks": { "type": "array" },
+              "providers": { "type": "array" },
+              "unity": { "type": "object" }
+            }
+          }
+        }
+      },
+      "timeoutSeconds": 30,
+      "artifacts": [],
+      "implemented": true,
+      "milestone": "M0",
+      "availability": "available",
+      "notes": "M0 已注册离线 Handler：检查应用/契约版本、项目与 .bdtool 可写性、Activity 根、目录加载与空 Provider 列表；不连接 Unity。"
+    },
+    {
+      "id": "operations.list",
+      "description": "列出当前目录中已登记的操作及其可用性。",
+      "effect": "read",
+      "environment": ["workspace"],
+      "requiredCapabilities": [],
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["operations"],
+        "properties": {
+          "operations": { "type": "array" }
+        }
+      },
+      "timeoutSeconds": 30,
+      "artifacts": [],
+      "implemented": false,
+      "milestone": "M1",
+      "availability": "planned",
+      "notes": "CLI 稳定化阶段实现。"
+    },
+    {
+      "id": "operations.describe",
+      "description": "读取单个操作的 Schema、效果、环境、能力与超时元数据。",
+      "effect": "read",
+      "environment": ["workspace"],
+      "requiredCapabilities": [],
+      "inputSchema": {
+        "type": "object",
+        "required": ["operationId"],
+        "properties": {
+          "operationId": { "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["operation"],
+        "properties": {
+          "operation": { "type": "object" }
+        }
+      },
+      "timeoutSeconds": 30,
+      "artifacts": [],
+      "implemented": false,
+      "milestone": "M1",
+      "availability": "planned",
+      "notes": "CLI 稳定化阶段实现。"
+    }
+  ]
+}
