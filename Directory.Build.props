@@ -6,7 +6,7 @@
     <Deterministic>true</Deterministic>
     <DebugType>portable</DebugType>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Product>BDTool</Product>
     <Company>BDTool</Company>
   </PropertyGroup>

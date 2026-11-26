@@ -1,14 +1,15 @@
 # BDTool
 
-BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool。**M3 已完成并真实验证**：新增只读 `project.asset-snapshot` 与单 Prefab 根对象 activeSelf 写入 `project.prefab-set-active`，目录 12 个操作全部 `available`；已在 Unity `6000.6.0f1` fixture 上跑通资产快照、dry-run、真实写入、stale CAS 拒绝与回滚恢复，Core EditMode 测试 25/25 通过。**M4 已完成**：提供可安装到项目 `.agents/skills` 的 `bdtool-overview` 与 `bdtool-unity-work` Codex Skill，包含防覆盖安装、Agent 使用边界和真实 CLI 验证。**M5 已完成**：新增 `bdtool-mcp` stdio Adapter，把 12 个 catalog 操作映射为高层 MCP Tool，并提供两个只读 Resource 与 Codex/JSON 配置生成。
+BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool。**M3 已完成并真实验证**：新增只读 `project.asset-snapshot` 与单 Prefab 根对象 activeSelf 写入 `project.prefab-set-active`，目录 12 个操作全部 `available`；已在 Unity `6000.6.0f1` fixture 上跑通资产快照、dry-run、真实写入、stale CAS 拒绝与回滚恢复，Core EditMode 测试 25/25 通过。**M4 已完成**：提供可安装到项目 `.agents/skills` 的 `bdtool-overview` 与 `bdtool-unity-work` Codex Skill，包含防覆盖安装、Agent 使用边界和真实 CLI 验证。**M5 已完成**：新增 `bdtool-mcp` stdio Adapter，把 12 个 catalog 操作映射为高层 MCP Tool，并提供两个只读 Resource 与 Codex/JSON 配置生成。**M6 已完成并真实验证**：新增 `BDTool.Provider.Official`，通过 Unity 官方 `com.unity.pipeline@0.10.0-exp.1` 公共 HTTP API 支持状态、场景层级、Prefab 快照和 activeSelf 写入。
 
 ## 当前状态
 
 - 已冻结解决方案、程序集、命名空间与 CLI 可执行名：`BDTool` / `bdtool`。
-- 产品版本 `1.0.0`，里程碑 `M5`；`BDToolIdentity` 与 `Directory.Build.props` 为 `1.0.0`。Akio Editor Provider 行为未变，仍声明实现版本 `0.3.0`。
+- 产品版本 `1.1.0`，里程碑 `M6`；`BDToolIdentity` 与 `Directory.Build.props` 为 `1.1.0`。Akio Editor Provider 行为未变，仍声明实现版本 `0.3.0`。
 - 目录共十二个操作：全部已注册 Handler 并标记为 `available`，包括 M1 的 `system.doctor`、`operations.list`、`operations.describe`、`project.context`、`workspace.read`、`workspace.search`、`workspace.fingerprint`、`workspace.apply`，M2 的 `project.inspect`、`project.probe`，以及 M3 的 `project.asset-snapshot`、`project.prefab-set-active`。
 - M4 新增两个项目级 Skill。安装目标固定为 `<project>/.agents/skills/<skill>`；只有带合法 `.bdtool-managed` 标记的目录可被更新，未受管同名目录会使整次安装失败且不写入另一个 Skill。
 - M5 新增 `BDTool.Mcp`，可执行名为 `bdtool-mcp`。MCP 工具直接来自 catalog，输入/输出 Schema 与 CLI 相同；调用统一进入 Application Gateway，并写 `source=mcp` 的 Activity。
+- M6 新增 `BDTool.Provider.Official`。默认仍选择 `akio`；`--editor-provider official` 显式使用官方 Pipeline，不会与 Akio 交叉重试。
 - `BDTool.Provider.Local` 上报 `workspace.read/search/fingerprint/write` 四个能力；Composition 是应用侧唯一引用该 Provider 的程序集。
 - `BDTool.Provider.Akio` 为可选 Editor Provider，通过 `unity-cli` 上报 `editor.status`、`editor.tool.read`、`editor.tool.write`、`editor.job`、`editor.cancel`；Composition 同样是唯一引用它的程序集。未安装 `unity-cli` 时应用仍按 M1 本地能力运行。
 - 每次有效调用都会尽力写入 Activity；`activity list` / `activity show` 可查询。
@@ -17,6 +18,7 @@ BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace P
 - M3 真实 Unity 6 端到端已验证：`project.asset-snapshot` 成功；`project.prefab-set-active` 的 dry-run、真实写入、stale CAS 拒绝与恢复均按预期工作（详见下文 M3 章节）。
 - M4 已验证首次安装、二次更新、冲突防覆盖、默认 JSON 信封、发布目录 references 复制与 Codex 实际发现/触发边界；安装不会创建 `.bdtool` Activity。
 - M5 已用官方 `ModelContextProtocol` SDK 客户端启动真实 stdio 子进程，验证 12 个工具、2 个 Resource、参数转发与 `project.context`/Activity，以及同一 `workspace.fingerprint` 请求在 CLI/MCP 返回相同结果信封。
+- M6 已在隔离 Unity `6000.6.0f1` 项目验证官方状态、场景层级、Prefab 快照、dry-run、真实 activeSelf 写入、保存回读和 stale CAS；Akio 专属 `project.probe` 在 Official Provider 上明确返回 `CAPABILITY_UNSUPPORTED`。
 
 ## 目录
 
@@ -32,11 +34,12 @@ src/BDTool.Activity         Activity 存储与脱敏策略
 src/BDTool.Application      用例运行时、能力检查、超时与退出码映射
 src/BDTool.Provider.Local   本地 Workspace Provider（仅依赖 Contracts/Core）
 src/BDTool.Provider.Akio    可选 unity-cli 只读 Editor Provider（仅依赖 Contracts）
+src/BDTool.Provider.Official 官方 com.unity.pipeline Editor Provider（仅依赖 Contracts）
 src/BDTool.Composition      唯一组合根
 src/BDTool.Cli              bdtool 可执行入口
 src/BDTool.Mcp              bdtool-mcp stdio MCP Adapter
 tests/BDTool.Tests          单元、组合、CLI、MCP 与架构测试
-docs/decisions              决策记录（0001-0008）
+docs/decisions              决策记录（0001-0009）
 ```
 
 ## 构建与测试
@@ -53,11 +56,13 @@ dotnet format BDTool.sln --verify-no-changes --no-restore
 
 默认输出 JSON，`--json` 可省略且幂等；`--human` 切换人类可读输出。所有 `operation` 路由都经过 Application Gateway，因此共享能力检查、超时与 Activity 审计；`activity list/show` 直接查询 Activity 存储，不生成新的 Activity。
 
-Editor 相关命令可用 `--unity-cli <exe>` 显式指定 `unity-cli`，用 `--unity-editor <exe>` 指定 Unity Editor。未显式指定时，`unity-cli` 按以下顺序发现：`--unity-cli` → `BDTOOL_UNITY_CLI_PATH` → 当前目录及祖先目录的 `.tools/unity-cli/win-x64/unity-cli.exe`（兼容平面 `.tools/unity-cli/unity-cli.exe`）→ 只读 PATH。显式路径或环境变量无效时直接报错而不回退；BDTool 不写入或修改系统 PATH。
+Editor Provider 默认选择 `akio`。可使用 `--editor-provider official` 选择 Unity 官方 Pipeline；当前调用只装配所选 Editor Provider，另一 Provider 不参与 fallback。
+
+Akio Provider 可用 `--unity-cli <exe>` 显式指定 `unity-cli`，用 `--unity-editor <exe>` 指定 Unity Editor。未显式指定时，`unity-cli` 按以下顺序发现：`--unity-cli` → `BDTOOL_UNITY_CLI_PATH` → 当前目录及祖先目录的 `.tools/unity-cli/win-x64/unity-cli.exe`（兼容平面 `.tools/unity-cli/unity-cli.exe`）→ 只读 PATH。显式路径或环境变量无效时直接报错而不回退；BDTool 不写入或修改系统 PATH。
 
 ```powershell
-bdtool doctor [--project <path>]
-bdtool context [--project <path>]
+bdtool doctor [--project <path>] [--editor-provider akio|official]
+bdtool context [--project <path>] [--editor-provider akio|official]
 bdtool operations list [--project <path>]
 bdtool operations describe workspace.read [--project <path>]
 bdtool run workspace.read --input input.json [--project <path>]
@@ -76,6 +81,7 @@ bdtool --version | --help
 - `operations list/describe` 进入 Gateway 并写入 Activity，不在解析阶段直接读目录。
 - 参数/组合错误在默认 JSON 模式下仍向 stdout 输出合法统一错误信封；stderr 只写诊断。
 - Ctrl+C 会取消当前调用并返回 `CANCELLED`/退出码 `7`。
+- `--editor-provider` 只接受 `akio` 或 `official`；未知值返回 `INVALID_ARGUMENT`/退出码 `2`。
 - `skills install` 是安装路由，不是 catalog operation；成功不创建 Activity，也不接受 `--unity-cli`、`--unity-editor`、`--catalog` 等未声明选项。
 - `workspace.*` 的 JSON 输入不接受 `projectPath`；项目边界由 `--project`（或组合根绑定的项目根）决定。`workspace.fingerprint` 的 `relativePaths` 必填，`workspace.apply` 的 `content` 必填（显式 `""` 表示有意清空）。
 - 失败信封始终包含 `data` 对象（缺省 `{}`），并保持统一信封字段（`status`、`warnings`、`errors`、`artifacts`、`proof`、`next`）。
@@ -133,6 +139,42 @@ CLI 从自身发布输出的 `skills/` 读取固定源，并安装到：
 - 当前 Unity 写入范围仍是单 Prefab 根对象 activeSelf；场景写入、批量资产与播放模式控制明确不在范围内。
 
 参见 [skills/README.md](skills/README.md)、[项目总览 Skill](skills/bdtool-overview/SKILL.md) 与 [Unity 工作 Skill](skills/bdtool-unity-work/SKILL.md)。
+
+## M6 官方 Pipeline Provider（已完成并真实验证）
+
+官方 Provider 通过 Unity Pipeline 发布的实例描述连接当前项目：
+
+```text
+<project>/Library/Pipeline/.unity-pipeline-port
+```
+
+运行时只读取本机 loopback 地址、进程信息与认证令牌；令牌不进入 ProviderDescriptor、错误详情、Activity 或日志。项目不包含 Pipeline 实例时，状态返回 `not-found`，操作明确失败。
+
+支持的公开操作：
+
+- `project.inspect`：调用官方 `scene get_hierarchy`，转换为既有 typed 层级。
+- `project.asset-snapshot`：调用官方 `script eval` 中的固定只读脚本。
+- `project.prefab-set-active`：调用固定写脚本，执行 CAS、Prefab 内容加载、保存、同步导入和回读。
+- `project.probe`：依赖 Akio 自定义 probe，Official Provider 明确返回 `CAPABILITY_UNSUPPORTED`。
+
+官方 Provider 的上游命令不作为 BDTool 公共工具暴露。CLI、MCP 与 Skill 仍只使用 catalog operation ID；业务层、Skill 与 MCP 工具目录未因 Provider 切换而改变。
+
+```powershell
+bdtool context --project <项目路径> --editor-provider official
+bdtool run project.inspect --project <项目路径> --editor-provider official --input-json '{}'
+bdtool run project.asset-snapshot --project <项目路径> --editor-provider official --input-json '{"assetPath":"Assets/Prefabs/A.prefab"}'
+```
+
+真实验证环境：
+
+- Unity `6000.6.0f1`，独立 fixture `E:\AI\BDTools\M6TestArea\PipelineFixture`。
+- `com.unity.pipeline` `0.10.0-exp.1`。
+- `context` 报告 Editor ready、`providerId=official` 和正确的 Unity 版本。
+- `project.inspect` 返回真实场景层级。
+- Prefab dry-run 返回 `saved=false`、`verified=false` 且 SHA 不变；真实写入返回 `saved=true`、`verified=true`，磁盘 SHA 从 `bc91…` 变为 `231d…`。
+- stale CAS 以退出码 `5` 拒绝，磁盘 SHA 保持不变。
+- `project.probe` 明确返回 `CAPABILITY_UNSUPPORTED`/退出码 `3`，未 fallback 到 Akio。
+- Activity 记录 `providerId=official` 与实际操作和 changedAssets。
 
 ## M5 MCP Adapter（已完成）
 
@@ -233,12 +275,15 @@ bdtool-mcp config --project <项目路径> --format codex
 
 ## 明确限制
 
-- M2 已完成范围为可选的 `unity-cli` 只读 Editor 能力（状态、层级与 custom probe 快照）；M3 已完成并真实验证单 Prefab 根对象 activeSelf 写入与资产快照；M4 增加项目级 Codex Skill 与安全安装；M5 增加 MCP 映射与配置生成，不增加新的 catalog 操作。
+- M2 已完成范围为可选的 `unity-cli` 只读 Editor 能力（状态、层级与 custom probe 快照）；M3 已完成并真实验证单 Prefab 根对象 activeSelf 写入与资产快照；M4 增加项目级 Codex Skill 与安全安装；M5 增加 MCP 映射与配置生成；M6 增加官方 Pipeline Provider，不增加新的 catalog 操作。
 - M3 不包含 multi-asset、bulk、场景写入、播放模式或全部 Unity 工具；`project.prefab-set-active` 只接受单个 `assetPath`。
 - M4 Skill 安装只支持项目级 `.agents/skills`，不做用户级安装、全局 Skill 替换或自动修改 Codex 配置。
 - M5 MCP 只实现 stdio，不提供 HTTP transport、MCP Prompt、资源订阅或低层 Editor 工具；MCP Resource 当前为固定 URI，不提供服务端资源变更通知。
+- M6 Official Provider 依赖 Unity 官方 `com.unity.pipeline` 的公开实例描述与 HTTP 命令 API，不修改或再分发官方包。
+- Official 写入通过固定的 `script eval` 脚本完成，不宣称 Unity Undo；结果中 `undoGroup` 为空，保存、强制导入、回读与磁盘 SHA 仍为完成证据。
+- Akio 专属 `project.probe` 在 Official Provider 上明确返回 `CAPABILITY_UNSUPPORTED`；不跨 Provider fallback。
 - 真实 Unity 6 验证使用 `E:\AI\BDTools\M2TestArea`（M2）与 `E:\AI\BDTools\M3TestArea\Unity6Fixture`（M3）fixture，原 TTF2 未修改；验证依赖本机 `unity-cli`/bridge。
 - 未安装 `unity-cli` 或 Editor 未就绪时，Editor 能力返回未就绪/不支持，M1 本地操作不受影响。
 - 不支持二进制写入、流式传输、跨进程强一致 CAS 或 CLI `--timeout` 覆盖；`workspace.apply` 编码后上限 1 MiB。
 - Activity 列表最多返回最近 100 条摘要；不持久化 Started 中间态。
-- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md)、[0005](docs/decisions/0005-bdtool-m2-akio-editor.md)、[0006](docs/decisions/0006-bdtool-m3-unity-core.md)、[0007](docs/decisions/0007-bdtool-m4-skills.md) 与 [0008](docs/decisions/0008-bdtool-m5-mcp.md)。
+- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md)、[0005](docs/decisions/0005-bdtool-m2-akio-editor.md)、[0006](docs/decisions/0006-bdtool-m3-unity-core.md)、[0007](docs/decisions/0007-bdtool-m4-skills.md)、[0008](docs/decisions/0008-bdtool-m5-mcp.md) 与 [0009](docs/decisions/0009-bdtool-m6-official-provider.md)。

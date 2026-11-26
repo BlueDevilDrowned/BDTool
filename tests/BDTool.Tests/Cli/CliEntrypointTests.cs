@@ -44,8 +44,8 @@ public sealed class CliEntrypointTests
         var data = root.GetProperty("data");
         Assert.Equal(JsonValueKind.Object, data.ValueKind);
         Assert.Equal("ready", data.GetProperty("state").GetString());
-        Assert.Equal("M5", data.GetProperty("milestone").GetString());
-        Assert.Equal("1.0.0", data.GetProperty("appVersion").GetString());
+        Assert.Equal("M6", data.GetProperty("milestone").GetString());
+        Assert.Equal("1.1.0", data.GetProperty("appVersion").GetString());
         Assert.Equal(BDToolContract.Version, data.GetProperty("contractVersion").GetString());
         Assert.Equal(Path.GetFullPath(project.ProjectPath), data.GetProperty("projectPath").GetString());
 
@@ -649,8 +649,52 @@ public sealed class CliEntrypointTests
         var (exitCode, stdout, stderr) = await RunAsync("--version");
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("bdtool 1.0.0", stdout, StringComparison.Ordinal);
+        Assert.Contains("bdtool 1.1.0", stdout, StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr);
+    }
+
+    [Fact]
+    public async Task Context_OfficialProviderSelectionUsesOnlySelectedEditorProvider()
+    {
+        using var project = new TemporaryProjectDirectory();
+
+        var (exitCode, stdout, stderr) = await RunAsync(
+            "context",
+            "--project",
+            project.ProjectPath,
+            "--editor-provider",
+            "official");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(string.Empty, stderr);
+        using var document = JsonDocument.Parse(stdout);
+        var providers = document.RootElement
+            .GetProperty("data")
+            .GetProperty("providers")
+            .EnumerateArray()
+            .Select(item => item.GetProperty("id").GetString())
+            .ToArray();
+        Assert.Equal(new[] { "local", "official" }, providers);
+        Assert.DoesNotContain("akio", providers);
+    }
+
+    [Fact]
+    public async Task Context_InvalidEditorProviderReturnsInvalidArgument()
+    {
+        using var project = new TemporaryProjectDirectory();
+
+        var (exitCode, stdout, _) = await RunAsync(
+            "context",
+            "--project",
+            project.ProjectPath,
+            "--editor-provider",
+            "unknown");
+
+        Assert.Equal(2, exitCode);
+        using var document = JsonDocument.Parse(stdout);
+        Assert.Equal(
+            "INVALID_ARGUMENT",
+            document.RootElement.GetProperty("errors")[0].GetProperty("code").GetString());
     }
 
     [Fact]
@@ -660,8 +704,9 @@ public sealed class CliEntrypointTests
 
         Assert.Equal(0, exitCode);
         Assert.Contains("用法", stdout, StringComparison.Ordinal);
-        Assert.Contains("M5 范围", stdout, StringComparison.Ordinal);
-        Assert.Contains("MCP Adapter", stdout, StringComparison.Ordinal);
+        Assert.Contains("M6 范围", stdout, StringComparison.Ordinal);
+        Assert.Contains("Akio/Official Editor Provider", stdout, StringComparison.Ordinal);
+        Assert.Contains("--editor-provider akio|official", stdout, StringComparison.Ordinal);
     }
 
     [Fact]

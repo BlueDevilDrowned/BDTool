@@ -454,7 +454,8 @@ public static class CliEntrypoint
                 ProjectPath = options.ProjectPath,
                 CatalogPath = options.CatalogPath,
                 UnityCliPath = options.UnityCliPath,
-                UnityEditorPath = options.UnityEditorPath
+                UnityEditorPath = options.UnityEditorPath,
+                EditorProvider = options.EditorProvider
             });
             return (runtime, null);
         }
@@ -666,18 +667,18 @@ public static class CliEntrypoint
         writer.WriteLine($"{BDToolIdentity.ExecutableName} {BDToolIdentity.Version}（{BDToolIdentity.ProductName} {BDToolIdentity.Milestone}）");
         writer.WriteLine();
         writer.WriteLine("用法（默认 JSON；--human 切换人类输出）:");
-        writer.WriteLine("  bdtool doctor [--project <path>] [--unity-cli <exe>] [--unity-editor <exe>] [--human]");
-        writer.WriteLine("  bdtool context [--project <path>] [--unity-cli <exe>] [--unity-editor <exe>] [--human]");
+        writer.WriteLine("  bdtool doctor [--project <path>] [--editor-provider akio|official] [--unity-cli <exe>] [--unity-editor <exe>] [--human]");
+        writer.WriteLine("  bdtool context [--project <path>] [--editor-provider akio|official] [--unity-cli <exe>] [--unity-editor <exe>] [--human]");
         writer.WriteLine("  bdtool operations list [--project <path>] [--human]");
         writer.WriteLine("  bdtool operations describe <id> [--project <path>] [--human]");
         writer.WriteLine("  bdtool skills install [--project <path>] [--scope project] [--human] [--json]");
-        writer.WriteLine("  bdtool run <id> [--input <file> | --input-json <json>] [--dry-run] [--project <path>] [--unity-cli <exe>] [--human]");
-        writer.WriteLine("  bdtool <id> [--input <file> | --input-json <json>] [--project <path>] [--unity-cli <exe>] [--human]");
+        writer.WriteLine("  bdtool run <id> [--input <file> | --input-json <json>] [--dry-run] [--project <path>] [--editor-provider akio|official] [--unity-cli <exe>] [--human]");
+        writer.WriteLine("  bdtool <id> [--input <file> | --input-json <json>] [--project <path>] [--editor-provider akio|official] [--unity-cli <exe>] [--human]");
         writer.WriteLine("  bdtool activity list|show <activityId> [--project <path>] [--human]");
         writer.WriteLine("  bdtool --version | --help");
         writer.WriteLine();
-        writer.WriteLine("M5 范围: 本地 Workspace、可选 Editor、项目级 Codex Skill 与 stdio MCP Adapter；MCP 只经 Application 执行 catalog 操作。");
-        writer.WriteLine("unity-cli 发现顺序: --unity-cli → BDTOOL_UNITY_CLI_PATH → 当前目录及祖先 .tools/unity-cli → PATH（只读，不改 PATH）。");
+        writer.WriteLine("M6 范围: 本地 Workspace、Akio/Official Editor Provider、项目级 Codex Skill 与 stdio MCP Adapter。");
+        writer.WriteLine("Akio unity-cli 发现顺序: --unity-cli → BDTOOL_UNITY_CLI_PATH → 当前目录及祖先 .tools/unity-cli → PATH（只读，不改 PATH）。");
         writer.WriteLine();
         writer.WriteLine("退出码:");
         writer.WriteLine("  0 成功  2 参数/未找到  3 能力不支持  4 项目/环境未就绪  5 执行失败");

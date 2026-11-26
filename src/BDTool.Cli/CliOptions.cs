@@ -20,6 +20,9 @@ internal sealed class CliOptions
     /// <summary>显式 Unity Editor 路径；为空时由组合根读取环境变量。</summary>
     public string? UnityEditorPath { get; set; }
 
+    /// <summary>Editor Provider 选择；默认保持既有 Akio 行为。</summary>
+    public string EditorProvider { get; set; } = "akio";
+
     public string? InputFile { get; set; }
     public string? InputJson { get; set; }
 }
@@ -57,6 +60,7 @@ internal static class CliOptionParser
         var catalogSeen = false;
         var unityCliSeen = false;
         var unityEditorSeen = false;
+        var editorProviderSeen = false;
         var inputSeen = false;
         var inputJsonSeen = false;
         var dryRunSeen = false;
@@ -139,6 +143,26 @@ internal static class CliOptionParser
 
                     unityEditorSeen = true;
                     options.UnityEditorPath = unityEditorPath;
+                    break;
+                case "--editor-provider" when allowRuntimeOptions:
+                    if (editorProviderSeen)
+                    {
+                        return OptionParseResult.Failure("重复选项 --editor-provider。");
+                    }
+
+                    if (!TryReadValue(args, ref index, "--editor-provider", out var editorProvider))
+                    {
+                        return OptionParseResult.Failure("--editor-provider 需要 akio 或 official。");
+                    }
+
+                    if (!string.Equals(editorProvider, "akio", StringComparison.Ordinal)
+                        && !string.Equals(editorProvider, "official", StringComparison.Ordinal))
+                    {
+                        return OptionParseResult.Failure("--editor-provider 只支持 akio 或 official。");
+                    }
+
+                    editorProviderSeen = true;
+                    options.EditorProvider = editorProvider;
                     break;
                 case "--input" when allowOperationOptions:
                     if (inputSeen || inputJsonSeen)

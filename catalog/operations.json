@@ -275,7 +275,7 @@
       "implemented": true,
       "milestone": "M2",
       "availability": "available",
-      "notes": "只读调用 unity-cli get_hierarchy；输出转换为 typed 层级，不返回上游原始响应。需要已连接 Editor 与 Bridge 0.19.1。"
+      "notes": "只读读取当前场景层级；Akio Provider 使用 get_hierarchy，Official Provider 使用官方 scene get_hierarchy，两者都收敛为同一 typed 层级，不返回上游原始响应。"
     },
     {
       "id": "project.probe",
@@ -320,11 +320,11 @@
       "implemented": true,
       "milestone": "M2",
       "availability": "available",
-      "notes": "输入严格为空对象；产品链路已接入 ProjectProbeHandler，结果收敛为 typed 8 字段 Product/UnityVersion/Platform/SceneName/ScenePath/SceneIsDirty/RootObjectCount/ObservedAtUtc。真实 Unity 6 custom tool 已有直接 CLI 证据，但真实端到端执行仍待验证；只读，不修改场景或资源。"
+      "notes": "输入严格为空对象；ProjectProbeHandler 结果为 typed 8 字段。此操作依赖 Akio 的 bdtool_read_only_probe custom tool；Official Provider 不映射该私有能力，明确返回 CAPABILITY_UNSUPPORTED。只读，不修改场景或资源。"
     },
     {
       "id": "project.asset-snapshot",
-      "description": "通过 Editor Provider 的只读工具读取单个 Prefab 的稳定资产快照。",
+      "description": "通过 Editor Provider 读取单个 Prefab 的稳定资产快照。",
       "effect": "read",
       "environment": ["editor"],
       "requiredCapabilities": ["editor.status", "editor.tool.read"],
@@ -367,11 +367,11 @@
       "implemented": true,
       "milestone": "M3",
       "availability": "available",
-      "notes": "输入严格为 {assetPath}；调用 bdtool_core_read，结果收敛为 typed 7 字段快照。资产路径语义、存在性与哈希口径由 Unity Core 负责；只读，不修改资产。已在 Unity 6 fixture 上完成真实端到端验证。"
+      "notes": "输入严格为 {assetPath}；Akio 使用 bdtool_core_read，Official 使用官方 script eval 的固定只读脚本，两者都收敛为 typed 7 字段快照。只读，不修改资产；两个 Provider 均已在 Unity 6 fixture 上完成真实端到端验证。"
     },
     {
       "id": "project.prefab-set-active",
-      "description": "在 SHA-256 CAS 保护下切换单个 Prefab 根对象的 activeSelf，支持 dry-run、Undo、保存与回读验证。",
+      "description": "在 SHA-256 CAS 保护下切换单个 Prefab 根对象的 activeSelf，支持 dry-run、保存与回读验证。",
       "effect": "editor-write",
       "environment": ["editor"],
       "requiredCapabilities": ["editor.status", "editor.tool.write"],
@@ -421,7 +421,7 @@
       "implemented": true,
       "milestone": "M3",
       "availability": "available",
-      "notes": "输入严格为 {assetPath, expectedSha256, isActive, dryRun?}；Submit 前由 Workspace 校验 SHA-256 CAS，不一致返回 PRECONDITION_FAILED 且不触达 Editor。上游 tool 为 bdtool_core_prefab_set_active；非 dry-run 使用 Undo 组、保存、强制同步导入与回读验证，要求 verified=true、isActive 回读正确且写入后 SHA 变化，并以磁盘指纹作为证据；提交后超时/取消或无法确认结果返回 EXECUTION_UNCERTAIN。dryRun 不创建 Undo、不保存、不要求 SHA 变化。仅支持单资产 Prefab 根对象 activeSelf，不支持 multi-asset、bulk 或场景写入；已在 Unity 6 fixture 上完成真实端到端验证。"
+      "notes": "输入严格为 {assetPath, expectedSha256, isActive, dryRun?}；Submit 前由 Workspace 校验 SHA-256 CAS，不一致返回 PRECONDITION_FAILED 且不触达 Editor。Akio 使用 bdtool_core_prefab_set_active 与 Undo；Official 使用官方 script eval 的固定脚本完成保存、强制同步导入与回读，不声称 Undo。两者都要求 verified=true、isActive 回读正确且写入后 SHA 变化，并以磁盘指纹作为证据；提交后超时/取消或无法确认结果返回 EXECUTION_UNCERTAIN。dryRun 不保存、不要求 SHA 变化。仅支持单资产 Prefab 根对象 activeSelf，不支持 multi-asset、bulk 或场景写入；两个 Provider 均已在 Unity 6 fixture 上完成真实端到端验证。"
     },
     {
       "id": "workspace.read",

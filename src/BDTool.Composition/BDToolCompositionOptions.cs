@@ -31,4 +31,10 @@ public sealed class BDToolCompositionOptions
 
     /// <summary>Editor 子进程默认超时；必须大于 0。</summary>
     public int EditorTimeoutMilliseconds { get; init; } = 60_000;
+
+    /// <summary>
+    /// Editor Provider 选择。默认 akio 保持 M2–M5 行为；official 使用
+    /// Unity 官方 Pipeline HTTP 协议。未知值在组合阶段明确拒绝。
+    /// </summary>
+    public string EditorProvider { get; init; } = "akio";
 }

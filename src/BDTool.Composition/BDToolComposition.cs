@@ -21,6 +21,7 @@ using BDTool.Operations.Projects;
 using BDTool.Operations.Workspace;
 using BDTool.Provider.Local;
 using BDTool.Provider.Akio;
+using BDTool.Provider.Official;
 
 namespace BDTool.Composition;
 
@@ -63,17 +64,40 @@ public static class BDToolComposition
         var providers = new List<ProviderDescriptor> { workspaceProvider };
 
         IEditorKernel? editor = null;
-        var unityCliPath = ResolveUnityCliPath(options.UnityCliPath);
-        if (!string.IsNullOrWhiteSpace(unityCliPath))
+        var editorProvider = string.IsNullOrWhiteSpace(options.EditorProvider)
+            ? "akio"
+            : options.EditorProvider.Trim().ToLowerInvariant();
+        if (string.Equals(editorProvider, "akio", StringComparison.Ordinal))
         {
-            editor = new AkioEditorKernel(
-                new AkioEditorOptions
+            var unityCliPath = ResolveUnityCliPath(options.UnityCliPath);
+            if (!string.IsNullOrWhiteSpace(unityCliPath))
+            {
+                editor = new AkioEditorKernel(
+                    new AkioEditorOptions
+                    {
+                        UnityCliPath = unityCliPath,
+                        ProjectPath = projectPath,
+                        UnityEditorPath = ResolveUnityEditorPath(options.UnityEditorPath) ?? string.Empty,
+                        DefaultTimeoutMilliseconds = options.EditorTimeoutMilliseconds
+                    });
+            }
+        }
+        else if (string.Equals(editorProvider, "official", StringComparison.Ordinal))
+        {
+            editor = new OfficialEditorKernel(
+                new OfficialEditorOptions
                 {
-                    UnityCliPath = unityCliPath,
                     ProjectPath = projectPath,
-                    UnityEditorPath = ResolveUnityEditorPath(options.UnityEditorPath) ?? string.Empty,
                     DefaultTimeoutMilliseconds = options.EditorTimeoutMilliseconds
                 });
+        }
+        else
+        {
+            throw new InvalidOperationException("未知 Editor Provider：" + options.EditorProvider);
+        }
+
+        if (editor is not null)
+        {
             providers.Add(editor.DescribeAsync(CancellationToken.None).GetAwaiter().GetResult());
         }
 

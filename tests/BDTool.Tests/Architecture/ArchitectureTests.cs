@@ -106,6 +106,7 @@ public sealed class ArchitectureTests
         var compositionReferences = GetReferences("BDTool.Composition");
         Assert.Contains("BDTool.Provider.Local", compositionReferences);
         Assert.Contains("BDTool.Provider.Akio", compositionReferences);
+        Assert.Contains("BDTool.Provider.Official", compositionReferences);
 
         var sourceRoot = Path.Combine(RepoPaths.Root, "src");
         foreach (var projectFile in Directory.EnumerateFiles(sourceRoot, "BDTool.*.csproj", SearchOption.AllDirectories))
@@ -154,6 +155,23 @@ public sealed class ArchitectureTests
 
         var solution = File.ReadAllText(Path.Combine(RepoPaths.Root, "BDTool.sln"));
         Assert.Contains("BDTool.Provider.Akio.csproj", solution, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OfficialProvider_DependsOnlyOnContracts()
+    {
+        var projectFile = Path.Combine(
+            RepoPaths.Root,
+            "src",
+            "BDTool.Provider.Official",
+            "BDTool.Provider.Official.csproj");
+        Assert.True(File.Exists(projectFile), "M6 必须包含 BDTool.Provider.Official 项目。");
+
+        var references = GetProjectReferences(XDocument.Load(projectFile));
+        Assert.Equal(new[] { "BDTool.Contracts" }, references.OrderBy(x => x));
+
+        var solution = File.ReadAllText(Path.Combine(RepoPaths.Root, "BDTool.sln"));
+        Assert.Contains("BDTool.Provider.Official.csproj", solution, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -374,6 +392,7 @@ public sealed class ArchitectureTests
             "BDTool.Cli",
             "BDTool.Provider.Local",
             "BDTool.Provider.Akio",
+            "BDTool.Provider.Official",
             "BDTool.Mcp",
             "BDTool.Tests"
         };
