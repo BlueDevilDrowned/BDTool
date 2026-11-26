@@ -367,7 +367,7 @@
       "implemented": true,
       "milestone": "M3",
       "availability": "available",
-      "notes": "输入严格为 {assetPath}；调用 bdtool_core_read，结果收敛为 typed 7 字段快照。资产路径语义、存在性与哈希口径由 Unity Core 负责；只读，不修改资产。真实 Unity M3 端到端尚未验证。"
+      "notes": "输入严格为 {assetPath}；调用 bdtool_core_read，结果收敛为 typed 7 字段快照。资产路径语义、存在性与哈希口径由 Unity Core 负责；只读，不修改资产。已在 Unity 6 fixture 上完成真实端到端验证。"
     },
     {
       "id": "project.prefab-set-active",
@@ -421,7 +421,7 @@
       "implemented": true,
       "milestone": "M3",
       "availability": "available",
-      "notes": "输入严格为 {assetPath, expectedSha256, isActive, dryRun?}；Submit 前由 Workspace 校验 SHA-256 CAS，不一致返回 PRECONDITION_FAILED 且不触达 Editor。上游 tool 为 bdtool_core_prefab_set_active；非 dry-run 使用 Undo 组、保存、强制同步导入与回读验证，要求 verified=true、isActive 回读正确且写入后 SHA 变化，并以磁盘指纹作为证据；提交后超时/取消或无法确认结果返回 EXECUTION_UNCERTAIN。dryRun 不创建 Undo、不保存、不要求 SHA 变化。仅支持单资产 Prefab 根对象 activeSelf，不支持 multi-asset、bulk 或 M4 能力；真实 Unity M3 端到端尚未验证。"
+      "notes": "输入严格为 {assetPath, expectedSha256, isActive, dryRun?}；Submit 前由 Workspace 校验 SHA-256 CAS，不一致返回 PRECONDITION_FAILED 且不触达 Editor。上游 tool 为 bdtool_core_prefab_set_active；非 dry-run 使用 Undo 组、保存、强制同步导入与回读验证，要求 verified=true、isActive 回读正确且写入后 SHA 变化，并以磁盘指纹作为证据；提交后超时/取消或无法确认结果返回 EXECUTION_UNCERTAIN。dryRun 不创建 Undo、不保存、不要求 SHA 变化。仅支持单资产 Prefab 根对象 activeSelf，不支持 multi-asset、bulk 或场景写入；已在 Unity 6 fixture 上完成真实端到端验证。"
     },
     {
       "id": "workspace.read",

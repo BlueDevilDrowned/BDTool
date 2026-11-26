@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <Content Include="..\..\catalog\operations.json" Link="catalog\operations.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 发布包内的固定 Skill 随 CLI 输出，references 子目录保持原层级。 -->
+    <Content Include="..\..\skills\**\*" Link="skills\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

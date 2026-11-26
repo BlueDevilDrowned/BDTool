@@ -11,6 +11,9 @@ internal sealed class CliOptions
     public string ProjectPath { get; set; } = string.Empty;
     public string? CatalogPath { get; set; }
 
+    /// <summary>Skill 安装作用域；默认且当前仅支持 project。</summary>
+    public string Scope { get; set; } = "project";
+
     /// <summary>显式 unity-cli 路径；为空时由组合根按默认发现顺序查找。</summary>
     public string? UnityCliPath { get; set; }
 
@@ -37,7 +40,17 @@ internal sealed class OptionParseResult
 /// </summary>
 internal static class CliOptionParser
 {
-    public static OptionParseResult Parse(string[] args, int startIndex, bool allowOperationOptions)
+    /// <summary>
+    /// 解析一次调用的选项。allowOperationOptions 控制 run 类输入选项，
+    /// allowSkillOptions 控制 skills 专属选项，allowRuntimeOptions 控制仅运行时
+    /// 命令使用的 catalog/Unity 路径选项；命令未声明的选项一律视为未知。
+    /// </summary>
+    public static OptionParseResult Parse(
+        string[] args,
+        int startIndex,
+        bool allowOperationOptions,
+        bool allowSkillOptions = false,
+        bool allowRuntimeOptions = true)
     {
         var options = new CliOptions();
         var projectSeen = false;
@@ -49,6 +62,7 @@ internal static class CliOptionParser
         var dryRunSeen = false;
         var humanSeen = false;
         var jsonSeen = false;
+        var scopeSeen = false;
 
         for (var index = startIndex; index < args.Length; index++)
         {
@@ -84,7 +98,7 @@ internal static class CliOptionParser
                     projectSeen = true;
                     options.ProjectPath = projectPath;
                     break;
-                case "--catalog":
+                case "--catalog" when allowRuntimeOptions:
                     if (catalogSeen)
                     {
                         return OptionParseResult.Failure("重复选项 --catalog。");
@@ -98,7 +112,7 @@ internal static class CliOptionParser
                     catalogSeen = true;
                     options.CatalogPath = catalogPath;
                     break;
-                case "--unity-cli":
+                case "--unity-cli" when allowRuntimeOptions:
                     if (unityCliSeen)
                     {
                         return OptionParseResult.Failure("重复选项 --unity-cli。");
@@ -112,7 +126,7 @@ internal static class CliOptionParser
                     unityCliSeen = true;
                     options.UnityCliPath = unityCliPath;
                     break;
-                case "--unity-editor":
+                case "--unity-editor" when allowRuntimeOptions:
                     if (unityEditorSeen)
                     {
                         return OptionParseResult.Failure("重复选项 --unity-editor。");
@@ -162,6 +176,20 @@ internal static class CliOptionParser
 
                     dryRunSeen = true;
                     options.DryRun = true;
+                    break;
+                case "--scope" when allowSkillOptions:
+                    if (scopeSeen)
+                    {
+                        return OptionParseResult.Failure("重复选项 --scope。");
+                    }
+
+                    if (!TryReadValue(args, ref index, "--scope", out var scope))
+                    {
+                        return OptionParseResult.Failure("--scope 需要一个值。");
+                    }
+
+                    scopeSeen = true;
+                    options.Scope = scope;
                     break;
                 default:
                     return OptionParseResult.Failure($"未知选项 {argument}。");

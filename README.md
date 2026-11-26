@@ -1,18 +1,20 @@
 # BDTool
 
-BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool。**M3 已完成并真实验证**：新增只读 `project.asset-snapshot` 与单 Prefab 根对象 activeSelf 写入 `project.prefab-set-active`，目录 12 个操作全部 `available`；已在 Unity `6000.6.0f1` fixture 上跑通资产快照、dry-run、真实写入、stale CAS 拒绝与回滚恢复，Core EditMode 测试 25/25 通过。
+BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool。**M3 已完成并真实验证**：新增只读 `project.asset-snapshot` 与单 Prefab 根对象 activeSelf 写入 `project.prefab-set-active`，目录 12 个操作全部 `available`；已在 Unity `6000.6.0f1` fixture 上跑通资产快照、dry-run、真实写入、stale CAS 拒绝与回滚恢复，Core EditMode 测试 25/25 通过。**M4 已完成**：提供可安装到项目 `.agents/skills` 的 `bdtool-overview` 与 `bdtool-unity-work` Codex Skill，包含防覆盖安装、Agent 使用边界和真实 CLI 验证。
 
 ## 当前状态
 
 - 已冻结解决方案、程序集、命名空间与 CLI 可执行名：`BDTool` / `bdtool`。
-- 产品版本 `0.3.0`，里程碑 `M3`；`BDToolIdentity`、`Directory.Build.props` 与 `BDTool.Provider.Akio` 的 `ImplementationVersion` 均为 `0.3.0`。
+- 产品版本 `0.4.0`，里程碑 `M4`；`BDToolIdentity` 与 `Directory.Build.props` 为 `0.4.0`。Akio Editor Provider 本轮行为未变，仍声明实现版本 `0.3.0`。
 - 目录共十二个操作：全部已注册 Handler 并标记为 `available`，包括 M1 的 `system.doctor`、`operations.list`、`operations.describe`、`project.context`、`workspace.read`、`workspace.search`、`workspace.fingerprint`、`workspace.apply`，M2 的 `project.inspect`、`project.probe`，以及 M3 的 `project.asset-snapshot`、`project.prefab-set-active`。
+- M4 新增两个项目级 Skill。安装目标固定为 `<project>/.agents/skills/<skill>`；只有带合法 `.bdtool-managed` 标记的目录可被更新，未受管同名目录会使整次安装失败且不写入另一个 Skill。
 - `BDTool.Provider.Local` 上报 `workspace.read/search/fingerprint/write` 四个能力；Composition 是应用侧唯一引用该 Provider 的程序集。
 - `BDTool.Provider.Akio` 为可选 Editor Provider，通过 `unity-cli` 上报 `editor.status`、`editor.tool.read`、`editor.tool.write`、`editor.job`、`editor.cancel`；Composition 同样是唯一引用它的程序集。未安装 `unity-cli` 时应用仍按 M1 本地能力运行。
 - 每次有效调用都会尽力写入 Activity；`activity list` / `activity show` 可查询。
 - `doctor` 与 `context` 只有在 Editor 报告 `ready` 且其挂载项目与请求项目一致时才显示 Connected/Pass；超时与 Provider 错误分别映射为稳定的未连接状态。
 - 真实 Unity 6 端到端已验证：`system ping`、`project.inspect`、`project.probe` custom tool 均通过 `unity-cli`/Akio Provider/Gateway 产品链路执行，Activity 记录 `providerId=akio` 且状态 `completed`。
 - M3 真实 Unity 6 端到端已验证：`project.asset-snapshot` 成功；`project.prefab-set-active` 的 dry-run、真实写入、stale CAS 拒绝与恢复均按预期工作（详见下文 M3 章节）。
+- M4 已验证首次安装、二次更新、冲突防覆盖、默认 JSON 信封、发布目录 references 复制与 Codex 实际发现/触发边界；安装不会创建 `.bdtool` Activity。
 
 ## 目录
 
@@ -20,8 +22,9 @@ BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace P
 BDTool.sln
 Directory.Build.props
 catalog/operations.json
+skills/                     两个 Codex Skill 的权威源与 Agent 使用说明
 src/BDTool.Contracts        BCL-only 公共 DTO、Port、错误与能力
-src/BDTool.Core             不依赖外部系统的领域规则（路径策略、原子写）
+src/BDTool.Core             不依赖外部系统的领域规则（路径策略、原子写、Skill 安装）
 src/BDTool.Operations       目录加载/校验、输入解析与十二个 Handler（含 M3 Projects）
 src/BDTool.Activity         Activity 存储与脱敏策略
 src/BDTool.Application      用例运行时、能力检查、超时与退出码映射
@@ -30,7 +33,7 @@ src/BDTool.Provider.Akio    可选 unity-cli 只读 Editor Provider（仅依赖 
 src/BDTool.Composition      唯一组合根
 src/BDTool.Cli              bdtool 可执行入口
 tests/BDTool.Tests          单元、组合、CLI 与架构测试
-docs/decisions              决策记录（0001-0006）
+docs/decisions              决策记录（0001-0007）
 ```
 
 ## 构建与测试
@@ -59,6 +62,7 @@ bdtool run workspace.apply --input-json '{"relativePath":"Assets/a.txt","content
 bdtool run project.asset-snapshot --input-json '{"assetPath":"Assets/Prefabs/A.prefab"}' [--project <path>]
 bdtool run project.prefab-set-active --input-json '{"assetPath":"Assets/Prefabs/A.prefab","expectedSha256":"<sha256>","isActive":false,"dryRun":true}' [--project <path>]
 bdtool workspace.fingerprint --input-json '{"relativePaths":["Assets/a.txt"]}'
+bdtool skills install [--project <path>] [--scope project] [--human] [--json]
 bdtool activity list [--project <path>]
 bdtool activity show <activityId> [--project <path>]
 bdtool --version | --help
@@ -69,6 +73,7 @@ bdtool --version | --help
 - `operations list/describe` 进入 Gateway 并写入 Activity，不在解析阶段直接读目录。
 - 参数/组合错误在默认 JSON 模式下仍向 stdout 输出合法统一错误信封；stderr 只写诊断。
 - Ctrl+C 会取消当前调用并返回 `CANCELLED`/退出码 `7`。
+- `skills install` 是安装路由，不是 catalog operation；成功不创建 Activity，也不接受 `--unity-cli`、`--unity-editor`、`--catalog` 等未声明选项。
 - `workspace.*` 的 JSON 输入不接受 `projectPath`；项目边界由 `--project`（或组合根绑定的项目根）决定。`workspace.fingerprint` 的 `relativePaths` 必填，`workspace.apply` 的 `content` 必填（显式 `""` 表示有意清空）。
 - 失败信封始终包含 `data` 对象（缺省 `{}`），并保持统一信封字段（`status`、`warnings`、`errors`、`artifacts`、`proof`、`next`）。
 
@@ -84,6 +89,47 @@ bdtool --version | --help
 | `6` | 超时（`TIMEOUT`） |
 | `7` | 调用方取消（`CANCELLED`） |
 | `8` | 结果不确定（`EXECUTION_UNCERTAIN`） |
+
+## M4 Codex Skill（已完成）
+
+### 安装与更新
+
+在目标项目根目录执行：
+
+```powershell
+bdtool skills install --scope project
+```
+
+也可以从其他目录显式指定项目：
+
+```powershell
+bdtool skills install --project <项目路径> --scope project
+```
+
+CLI 从自身发布输出的 `skills/` 读取固定源，并安装到：
+
+```text
+<project>/.agents/skills/bdtool-overview/
+<project>/.agents/skills/bdtool-unity-work/
+```
+
+- 首次安装的两个结果均带 `updated=false`；再次安装会受管刷新并带 `updated=true`。
+- 已存在但不是 BDTool 管理的同名 Skill 目录会返回统一 JSON 信封、`PRECONDITION_FAILED`、退出码 `5` 和 `data.conflicts`；整次安装不会覆盖或部分写入另一个 Skill。
+- `.bdtool-managed` 记录格式版本、Skill 名和源树 SHA-256。源 Skill、目标目录及子项会检查路径逃逸与 reparse point。
+- M4 只支持 `--scope project`；`user` 或未知作用域返回 `INVALID_ARGUMENT`/退出码 `2`。
+- Skill 安装不是 catalog operation，不写 Activity，也不会创建 `<project>/.bdtool`。
+
+安装或刷新后重新加载 Codex 会话，再在目标项目中确认两个 Skill 已被发现。
+
+### Agent 使用边界
+
+- `bdtool-overview`：仅在用户明确提到 BDTool，或请求很可能需要通过 BDTool 完成时使用。先调用 `bdtool doctor --json` 与 `bdtool context --json`，按真实 Provider、能力和 Editor 状态决定后续。
+- `bdtool-unity-work`：仅在用户明确要求通过 BDTool 检查或修改 Unity 项目、场景、Prefab、资源配置或验证结果时使用。写入必须获得当次项目、目标资产和预期变更授权，并依次完成快照、dry-run、真实写入、回读与验证。
+- 普通编程或普通 Unity 问答，在没有 BDTool 参与时，不触发这两个 Skill。
+- Skill 只调用 `bdtool` 稳定 CLI；不暴露或调用 `unity-cli`、具体 Provider 类或底层桥接命令。
+- 当前 Unity 写入范围仍是单 Prefab 根对象 activeSelf；场景写入、批量资产与播放模式控制明确不在范围内。
+
+参见 [skills/README.md](skills/README.md)、[项目总览 Skill](skills/bdtool-overview/SKILL.md) 与 [Unity 工作 Skill](skills/bdtool-unity-work/SKILL.md)。
 
 ## Workspace 语义
 
@@ -117,7 +163,7 @@ bdtool --version | --help
 - 写后证据：非 dry-run 要求 `changed=true`、`saved=true`、`verified=true`、`isActive` 回读等于请求值且 `newSha256 != previousSha256`，并再次读取 Workspace 指纹作为磁盘证据；`ChangedAssets`、`Proof.InputFingerprint`、`Proof.OutputFingerprint`、`Evidence` 与 warnings 由真实结果填充。
 - dry-run：不创建 Undo 组、不保存、不修改资产，也不要求文件 SHA 变化；`Proof` 的输入/输出指纹都等于 pre-SHA，结果只描述 activeSelf 预检。
 - 提交后超时、取消或无法确认写入结果返回 `EXECUTION_UNCERTAIN`/`Uncertain`，不伪装成可安全重试的普通失败。
-- 仅支持单个 Prefab 根对象 activeSelf；不支持 multi-asset、bulk、场景写入、播放模式或 M4 能力。
+- 仅支持单个 Prefab 根对象 activeSelf；不支持 multi-asset、bulk、场景写入或播放模式。M4 Skill 不扩大这些项目操作范围。
 - 验证环境：Unity `6000.6.0f1`，fixture `E:\AI\BDTools\M3TestArea\Unity6Fixture`；两个 BDTool 包以 embedded 方式安装成功。
 - Core EditMode 过滤测试 25/25 通过，结果文件 `E:\AI\BDTools\M3TestArea\Results\core-editmode-final2.xml`（`result="Passed"`）。
 - adapter tools schema 如实上报：`bdtool_core_read` 为 `mutating=false`，`bdtool_core_prefab_set_active` 为 `mutating=true`。
@@ -134,10 +180,11 @@ bdtool --version | --help
 
 ## 明确限制
 
-- M2 已完成范围为可选的 `unity-cli` 只读 Editor 能力（状态、层级与 custom probe 快照）；M3 已完成并真实验证单 Prefab 根对象 activeSelf 写入与资产快照。
+- M2 已完成范围为可选的 `unity-cli` 只读 Editor 能力（状态、层级与 custom probe 快照）；M3 已完成并真实验证单 Prefab 根对象 activeSelf 写入与资产快照；M4 只增加项目级 Codex Skill 与安全安装，不增加新的项目操作能力。
 - M3 不包含 multi-asset、bulk、场景写入、播放模式或全部 Unity 工具；`project.prefab-set-active` 只接受单个 `assetPath`。
+- M4 Skill 安装只支持项目级 `.agents/skills`，不做用户级安装、全局 Skill 替换或自动修改 Codex 配置。
 - 真实 Unity 6 验证使用 `E:\AI\BDTools\M2TestArea`（M2）与 `E:\AI\BDTools\M3TestArea\Unity6Fixture`（M3）fixture，原 TTF2 未修改；验证依赖本机 `unity-cli`/bridge。
 - 未安装 `unity-cli` 或 Editor 未就绪时，Editor 能力返回未就绪/不支持，M1 本地操作不受影响。
 - 不支持二进制写入、流式传输、跨进程强一致 CAS 或 CLI `--timeout` 覆盖；`workspace.apply` 编码后上限 1 MiB。
 - Activity 列表最多返回最近 100 条摘要；不持久化 Started 中间态。
-- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md)、[0005](docs/decisions/0005-bdtool-m2-akio-editor.md) 与 [0006](docs/decisions/0006-bdtool-m3-unity-core.md)。
+- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md)、[0005](docs/decisions/0005-bdtool-m2-akio-editor.md)、[0006](docs/decisions/0006-bdtool-m3-unity-core.md) 与 [0007](docs/decisions/0007-bdtool-m4-skills.md)。

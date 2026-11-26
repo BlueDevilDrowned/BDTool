@@ -13,8 +13,8 @@ public static class BDToolIdentity
     public const string ExecutableName = "bdtool";
 
     /// <summary>当前产品版本；里程碑由 <see cref="Milestone"/> 单独表达，不随版本号耦合。</summary>
-    public const string Version = "0.3.0";
+    public const string Version = "0.4.0";
 
     /// <summary>当前里程碑标识，用于快照和诊断输出。</summary>
-    public const string Milestone = "M3";
+    public const string Milestone = "M4";
 }

@@ -12,6 +12,7 @@ using BDTool.Contracts.Activity;
 using BDTool.Contracts.Errors;
 using BDTool.Contracts.Gateway;
 using BDTool.Contracts.Operations;
+using BDTool.Contracts.Skills;
 using BDTool.Core;
 using BDTool.Operations.Catalog;
 
@@ -104,6 +105,11 @@ public static class CliEntrypoint
         if (string.Equals(command, "operations", StringComparison.Ordinal))
         {
             return await RunOperationsCommandAsync(args, stdout, stderr, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (string.Equals(command, "skills", StringComparison.Ordinal))
+        {
+            return RunSkillsCommand(args, stdout, stderr, cancellationToken);
         }
 
         if (string.Equals(command, "run", StringComparison.Ordinal))
@@ -200,6 +206,50 @@ public static class CliEntrypoint
         }
 
         return WriteInvalidArgument("operations 需要 list 或 describe 子命令。", new CliOptions(), stdout, stderr);
+    }
+
+    /// <summary>
+    /// skills install 是安装路由，不是 catalog operation：只经组合根安装入口，
+    /// 不创建 Activity，也不通过 Gateway。作用域与输出模式在调用组合根前完成校验。
+    /// </summary>
+    private static int RunSkillsCommand(
+        string[] args,
+        TextWriter stdout,
+        TextWriter stderr,
+        CancellationToken cancellationToken)
+    {
+        var subcommand = args.Length > 1 ? args[1] : string.Empty;
+        if (!string.Equals(subcommand, "install", StringComparison.Ordinal))
+        {
+            return WriteInvalidArgument("skills 需要 install 子命令。", new CliOptions(), stdout, stderr);
+        }
+
+        var parse = CliOptionParser.Parse(
+            args,
+            startIndex: 2,
+            allowOperationOptions: false,
+            allowSkillOptions: true,
+            allowRuntimeOptions: false);
+        if (parse.Error is not null)
+        {
+            return WriteInvalidArgument(parse.Error, InferOutputMode(args), stdout, stderr);
+        }
+
+        var options = parse.Options!;
+        if (!string.Equals(options.Scope, "project", StringComparison.Ordinal))
+        {
+            return WriteInvalidArgument("仅支持 project Skill 安装作用域。", options, stdout, stderr);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // 源 Skill 根由组合根解析到 AppContext.BaseDirectory/skills，CLI 不构造安装器。
+        var result = BDToolComposition.InstallProjectSkills(
+            options.ProjectPath,
+            sourceSkillsRoot: null,
+            BDToolIdentity.Version);
+        WriteSkillsResult(result, options, stdout, stderr);
+        return (int)ExitCodePolicy.Map(result);
     }
 
     /// <summary>activity 是 CLI 查询路由，不映射到业务操作，也不写新的 Activity。</summary>
@@ -510,6 +560,44 @@ public static class CliEntrypoint
         stdout.WriteLine(CliOutput.SerializeResult(result));
     }
 
+    /// <summary>
+    /// Skill 安装结果的输出。JSON 模式沿用统一信封；人类模式由本入口直接排版，
+    /// 因为安装结果不是 catalog operation，不进入通用操作格式化器。
+    /// </summary>
+    private static void WriteSkillsResult(
+        OperationResult<SkillInstallResult> result,
+        CliOptions options,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        if (!options.Human)
+        {
+            stdout.WriteLine(CliOutput.SerializeResult(result));
+            return;
+        }
+
+        stdout.WriteLine("status: " + JsonNamingPolicy.CamelCase.ConvertName(result.Status.ToString()));
+        stdout.WriteLine("scope: " + result.Data.Scope);
+        stdout.WriteLine("project: " + result.Data.ProjectPath);
+        stdout.WriteLine("skillsRoot: " + result.Data.SkillsRoot);
+        foreach (var skill in result.Data.Skills)
+        {
+            stdout.WriteLine(
+                $"skill: {skill.Name}\t{(skill.Updated ? "updated" : "installed")}\t{skill.DestinationPath}");
+        }
+
+        foreach (var conflict in result.Data.Conflicts)
+        {
+            stdout.WriteLine($"conflict: {conflict.Name}\t{conflict.DestinationPath}");
+            stdout.WriteLine("reason: " + conflict.Reason);
+        }
+
+        foreach (var error in result.Errors)
+        {
+            stderr.WriteLine($"bdtool: {error.Code} ({error.Stage}) {error.Message}");
+        }
+    }
+
     private static int WriteInvalidArgument(
         string message,
         CliOptions options,
@@ -582,12 +670,13 @@ public static class CliEntrypoint
         writer.WriteLine("  bdtool context [--project <path>] [--unity-cli <exe>] [--unity-editor <exe>] [--human]");
         writer.WriteLine("  bdtool operations list [--project <path>] [--human]");
         writer.WriteLine("  bdtool operations describe <id> [--project <path>] [--human]");
+        writer.WriteLine("  bdtool skills install [--project <path>] [--scope project] [--human] [--json]");
         writer.WriteLine("  bdtool run <id> [--input <file> | --input-json <json>] [--dry-run] [--project <path>] [--unity-cli <exe>] [--human]");
         writer.WriteLine("  bdtool <id> [--input <file> | --input-json <json>] [--project <path>] [--unity-cli <exe>] [--human]");
         writer.WriteLine("  bdtool activity list|show <activityId> [--project <path>] [--human]");
         writer.WriteLine("  bdtool --version | --help");
         writer.WriteLine();
-        writer.WriteLine("M3 范围: 本地 Workspace + 可选 Akio Editor；已真实验证 Unity 6 的 scene inspect、custom probe 与 Prefab activeSelf 受控写入。");
+        writer.WriteLine("M4 范围: 本地 Workspace、可选 Editor 能力与项目级 Codex Skill；Skill 只通过 bdtool 稳定 CLI 调用。");
         writer.WriteLine("unity-cli 发现顺序: --unity-cli → BDTOOL_UNITY_CLI_PATH → 当前目录及祖先 .tools/unity-cli → PATH（只读，不改 PATH）。");
         writer.WriteLine();
         writer.WriteLine("退出码:");

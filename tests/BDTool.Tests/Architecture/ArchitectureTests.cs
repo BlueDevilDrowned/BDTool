@@ -151,6 +151,32 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
+    public void Cli_SkillsInstall_StaysProviderFreeAndUsesComposition()
+    {
+        AssertNoProviderReference("BDTool.Cli");
+
+        // CLI 只能经组合根安装入口调用 Skill；直接构造 Core 安装器会把路径解析、
+        // 冲突预检和错误映射散落到表现层。
+        var source = File.ReadAllText(Path.Combine(
+            RepoPaths.Root,
+            "src",
+            "BDTool.Cli",
+            "CliEntrypoint.cs"));
+        Assert.Contains("BDToolComposition.InstallProjectSkills", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("new SkillInstaller", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("using BDTool.Core.Skills", source, StringComparison.Ordinal);
+
+        // 发布 Skill 必须作为 CLI 输出内容复制，并通过 Link 保留 references 层级。
+        var document = XDocument.Load(RepoPaths.ProjectFile("BDTool.Cli"));
+        var contentIncludes = document.Descendants()
+            .Where(element => element.Name.LocalName == "Content")
+            .Select(element => ((string?)element.Attribute("Include"))?.Replace('\\', '/'))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToArray();
+        Assert.Contains(contentIncludes, value => value!.EndsWith("skills/**/*", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Contracts_SourcesDoNotReferenceJsonHttpMcpOrUnity()
     {
         var directory = Path.Combine(RepoPaths.Root, "src", "BDTool.Contracts");

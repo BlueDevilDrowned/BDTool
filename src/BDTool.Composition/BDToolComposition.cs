@@ -1,12 +1,18 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using BDTool.Application;
 using BDTool.Application.Diagnostics;
 using BDTool.Application.Offline;
 using BDTool.Activity;
+using BDTool.Contracts;
 using BDTool.Contracts.Editor;
+using BDTool.Contracts.Errors;
 using BDTool.Contracts.Operations;
 using BDTool.Contracts.Providers;
+using BDTool.Contracts.Skills;
+using BDTool.Core.Skills;
 using BDTool.Operations.Catalog;
 using BDTool.Operations.Diagnostics;
 using BDTool.Operations.Handlers;
@@ -26,6 +32,9 @@ public static class BDToolComposition
 {
     /// <summary>输出目录下的默认目录文件相对路径。</summary>
     public const string DefaultCatalogRelativePath = "catalog/operations.json";
+
+    /// <summary>发布包内 Skill 根目录相对路径，随 CLI 输出复制。</summary>
+    private const string SkillsRelativePath = "skills";
 
     /// <summary>
     /// 装配运行时：目录 + Workspace/可选 Editor Provider + Handler + 文件存储 + 网关。
@@ -109,6 +118,84 @@ public static class BDToolComposition
             executionProviderId: workspaceProvider.Id);
 
         return new BDToolRuntime(catalog, handlers, gateway, activityStore, projectPath, catalogPath);
+    }
+
+    /// <summary>
+    /// 把发布包内的 Skill 安装到项目的 project 作用域。Cli 只调用该入口，不直接依赖
+    /// Core 安装器；源根为空时使用 AppContext.BaseDirectory/skills（CLI 输出目录）。
+    /// 安装不经过目录或 Gateway，因此不会创建 Activity；冲突与失败只映射为结果信封。
+    /// </summary>
+    public static OperationResult<SkillInstallResult> InstallProjectSkills(
+        string projectPath,
+        string? sourceSkillsRoot,
+        string appVersion)
+    {
+        if (string.IsNullOrWhiteSpace(appVersion))
+        {
+            throw new ArgumentException("应用版本不能为空。", nameof(appVersion));
+        }
+
+        var resolvedProjectPath = string.IsNullOrWhiteSpace(projectPath)
+            ? Directory.GetCurrentDirectory()
+            : projectPath;
+        var resolvedSourceRoot = string.IsNullOrWhiteSpace(sourceSkillsRoot)
+            ? Path.Combine(AppContext.BaseDirectory, SkillsRelativePath)
+            : sourceSkillsRoot;
+
+        try
+        {
+            var result = new SkillInstaller(resolvedSourceRoot).Install(resolvedProjectPath);
+            var envelope = new OperationResult<SkillInstallResult>
+            {
+                Data = result,
+                Status = result.Conflicts.Count == 0 ? OperationStatus.Completed : OperationStatus.Failed
+            };
+
+            // appVersion 只作为证据记录，不参与安装判定；结果成功与否完全由安装器返回。
+            envelope.Proof.Evidence["appVersion"] = appVersion;
+            envelope.Proof.Evidence["scope"] = result.Scope;
+
+            if (result.Conflicts.Count > 0)
+            {
+                envelope.Errors.Add(new KernelError
+                {
+                    Code = ErrorCodes.PreconditionFailed,
+                    Stage = "skills",
+                    Message = "Skill 安装目标存在冲突，未写入任何文件。",
+                    Retryable = false,
+                    Details = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["conflictCount"] = result.Conflicts.Count.ToString(CultureInfo.InvariantCulture),
+                        ["skillsRoot"] = result.SkillsRoot
+                    }
+                });
+            }
+
+            return envelope;
+        }
+        catch (SkillInstallerException exception)
+        {
+            var failure = new OperationResult<SkillInstallResult>
+            {
+                Status = OperationStatus.Failed,
+                Data = new SkillInstallResult
+                {
+                    Scope = SkillInstaller.ProjectScope,
+                    ProjectPath = resolvedProjectPath,
+                    SkillsRoot = string.Empty
+                }
+            };
+            failure.Errors.Add(new KernelError
+            {
+                Code = exception.Code,
+                Stage = "skills",
+                Message = exception.Message,
+                Retryable = false,
+                Details = new Dictionary<string, string>(StringComparer.Ordinal)
+            });
+            failure.Proof.Evidence["appVersion"] = appVersion;
+            return failure;
+        }
     }
 
     /// <summary>解析目录文件路径：显式路径优先，否则取应用输出目录。</summary>
