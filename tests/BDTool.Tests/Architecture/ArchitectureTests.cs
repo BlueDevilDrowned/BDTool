@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using BDTool.Contracts.Errors;
 using BDTool.Contracts.Operations;
 using BDTool.Contracts.Projects;
@@ -403,6 +405,112 @@ public sealed class ArchitectureTests
         }
 
         Assert.False(File.Exists(Path.Combine(RepoPaths.Root, "BDTool.slnx")));
+    }
+
+    [Fact]
+    public void Presentation_DependsOnlyOnApplicationAndContracts()
+    {
+        var references = GetReferences("BDTool.Presentation");
+
+        Assert.Equal(
+            new[] { "BDTool.Application", "BDTool.Contracts" },
+            references.OrderBy(value => value));
+        AssertNoProviderReference("BDTool.Presentation");
+
+        var sourceRoot = Path.Combine(RepoPaths.Root, "src", "BDTool.Presentation");
+        // ICommand 属于 BCL 的 MVVM 命令契约，不等于引用 WPF；禁止具体 WPF UI 命名空间。
+        var forbidden = new[]
+        {
+            "using System.Windows;",
+            "using System.Windows.Controls",
+            "using System.Windows.Data",
+            "using System.Windows.Media",
+            "UnityEditor",
+            "UnityEngine",
+            "BDTool.Provider"
+        };
+        var violations = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => File.ReadLines(file)
+                .Select(line => line.TrimStart())
+                .Where(line => line.StartsWith("using ", StringComparison.Ordinal))
+                .Where(line => forbidden.Any(prefix =>
+                    line.Contains(prefix, StringComparison.Ordinal)))
+                .Select(line => Path.GetFileName(file) + ": " + line))
+            .ToArray();
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void Desktop_DependsOnPresentationAndCompositionOnly()
+    {
+        var document = XDocument.Load(RepoPaths.ProjectFile("BDTool.Desktop"));
+        var references = GetProjectReferences(document).OrderBy(value => value).ToArray();
+
+        Assert.Equal(
+            new[] { "BDTool.Composition", "BDTool.Presentation" },
+            references);
+        Assert.Equal("net10.0-windows", GetProperty(document, "TargetFramework"));
+        Assert.Equal("true", GetProperty(document, "UseWPF"));
+
+        var solution = File.ReadAllText(Path.Combine(RepoPaths.Root, "BDTool.sln"));
+        Assert.Contains("BDTool.Presentation.csproj", solution, StringComparison.Ordinal);
+        Assert.Contains("BDTool.Desktop.csproj", solution, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Desktop_ThemesMatchCanonicalDesignTokens()
+    {
+        var tokenPath = Path.Combine(RepoPaths.Root, "design", "tokens.json");
+        using var tokens = JsonDocument.Parse(File.ReadAllText(tokenPath));
+        var expected = tokens.RootElement.GetProperty("colors")
+            .EnumerateObject()
+            .ToDictionary(
+                property => property.Name,
+                property => property.Value.GetString()!,
+                StringComparer.Ordinal);
+        var darkPath = Path.Combine(
+            RepoPaths.Root,
+            "src",
+            "BDTool.Desktop",
+            "Themes",
+            "Dark.xaml");
+        var actual = XDocument.Load(darkPath)
+            .Descendants()
+            .Where(element => element.Name.LocalName == "Color")
+            .ToDictionary(
+                element => ((string?)element.Attribute(XName.Get(
+                    "Key",
+                    "http://schemas.microsoft.com/winfx/2006/xaml"))) ?? string.Empty,
+                element => element.Value,
+                StringComparer.Ordinal);
+
+        Assert.Equal(expected.Count, actual.Count);
+        foreach (var pair in expected)
+        {
+            Assert.Equal(pair.Value, actual[pair.Key], ignoreCase: true);
+        }
+    }
+
+    [Fact]
+    public void Desktop_ViewsDoNotScatterRawColors()
+    {
+        var directories = new[]
+        {
+            Path.Combine(RepoPaths.Root, "src", "BDTool.Desktop", "Views"),
+            Path.Combine(RepoPaths.Root, "src", "BDTool.Desktop", "Controls")
+        };
+        var files = directories
+            .SelectMany(path => Directory.EnumerateFiles(path, "*.xaml", SearchOption.TopDirectoryOnly))
+            .Concat(new[]
+            {
+                Path.Combine(RepoPaths.Root, "src", "BDTool.Desktop", "MainWindow.xaml")
+            });
+        foreach (var file in files)
+        {
+            Assert.DoesNotMatch(
+                new Regex("#[0-9A-Fa-f]{6,8}", RegexOptions.CultureInvariant),
+                File.ReadAllText(file));
+        }
     }
 
     private static void AssertNoProviderReference(string projectName)

@@ -1,0 +1,53 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Color x:Key="background.canvas">#111418</Color>
+    <Color x:Key="background.primary">#171C23</Color>
+    <Color x:Key="background.secondary">#1D232C</Color>
+    <Color x:Key="background.hover">#242B36</Color>
+    <Color x:Key="border.default">#2A323D</Color>
+    <Color x:Key="border.strong">#3A4553</Color>
+    <Color x:Key="text.primary">#E7EAF0</Color>
+    <Color x:Key="text.secondary">#9AA5B4</Color>
+    <Color x:Key="text.tertiary">#6F7B8B</Color>
+    <Color x:Key="accent.default">#4C8DFF</Color>
+    <Color x:Key="accent.hover">#6BA2FF</Color>
+    <Color x:Key="accent.subtle">#1B3159</Color>
+    <Color x:Key="success">#3FB950</Color>
+    <Color x:Key="warning">#D29922</Color>
+    <Color x:Key="danger">#F85149</Color>
+    <Color x:Key="uncertain">#B083F0</Color>
+    <Color x:Key="info">#37B4E8</Color>
+    <Color x:Key="overlay.scrim">#99000000</Color>
+
+    <SolidColorBrush x:Key="brush.background.canvas" Color="{StaticResource background.canvas}" />
+    <SolidColorBrush x:Key="brush.background.primary" Color="{StaticResource background.primary}" />
+    <SolidColorBrush x:Key="brush.background.secondary" Color="{StaticResource background.secondary}" />
+    <SolidColorBrush x:Key="brush.background.hover" Color="{StaticResource background.hover}" />
+    <SolidColorBrush x:Key="brush.border.default" Color="{StaticResource border.default}" />
+    <SolidColorBrush x:Key="brush.border.strong" Color="{StaticResource border.strong}" />
+    <SolidColorBrush x:Key="brush.text.primary" Color="{StaticResource text.primary}" />
+    <SolidColorBrush x:Key="brush.text.secondary" Color="{StaticResource text.secondary}" />
+    <SolidColorBrush x:Key="brush.text.tertiary" Color="{StaticResource text.tertiary}" />
+    <SolidColorBrush x:Key="brush.accent.default" Color="{StaticResource accent.default}" />
+    <SolidColorBrush x:Key="brush.accent.hover" Color="{StaticResource accent.hover}" />
+    <SolidColorBrush x:Key="brush.accent.subtle" Color="{StaticResource accent.subtle}" />
+    <SolidColorBrush x:Key="brush.success" Color="{StaticResource success}" />
+    <SolidColorBrush x:Key="brush.warning" Color="{StaticResource warning}" />
+    <SolidColorBrush x:Key="brush.danger" Color="{StaticResource danger}" />
+    <SolidColorBrush x:Key="brush.uncertain" Color="{StaticResource uncertain}" />
+    <SolidColorBrush x:Key="brush.info" Color="{StaticResource info}" />
+    <SolidColorBrush x:Key="brush.overlay.scrim" Color="{StaticResource overlay.scrim}" />
+
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="spacing.xs">4</sys:Double>
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="spacing.sm">8</sys:Double>
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="spacing.md">12</sys:Double>
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="spacing.lg">16</sys:Double>
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="spacing.xl">24</sys:Double>
+    <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="spacing.2xl">32</sys:Double>
+    <CornerRadius x:Key="radius.sm">4</CornerRadius>
+    <CornerRadius x:Key="radius.md">6</CornerRadius>
+    <CornerRadius x:Key="radius.lg">8</CornerRadius>
+    <FontFamily x:Key="font.ui">Segoe UI Variable, Segoe UI</FontFamily>
+    <FontFamily x:Key="font.code">Cascadia Code, Consolas</FontFamily>
+</ResourceDictionary>

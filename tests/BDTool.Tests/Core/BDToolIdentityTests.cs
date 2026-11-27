@@ -10,10 +10,10 @@ namespace BDTool.Tests.Core;
 public sealed class BDToolIdentityTests
 {
     [Fact]
-    public void Milestone_IsM7_AndProductVersionIsOneTwoZero()
+    public void Milestone_IsM8Point1_AndProductVersionIsOneThreeZero()
     {
-        Assert.Equal("M7", BDToolIdentity.Milestone);
-        Assert.Equal("1.2.0", BDToolIdentity.Version);
+        Assert.Equal("M8.1", BDToolIdentity.Milestone);
+        Assert.Equal("1.3.0", BDToolIdentity.Version);
         Assert.Equal(BDToolIdentity.Milestone, DoctorHandler.CurrentMilestone);
     }
 }

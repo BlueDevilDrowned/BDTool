@@ -1,5 +1,6 @@
 using BDTool.Contracts.Gateway;
 using BDTool.Contracts.Activity;
+using BDTool.Contracts.Capabilities;
 using BDTool.Contracts.Formation;
 using BDTool.Contracts.Operations;
 using BDTool.Operations.Handlers;
@@ -18,6 +19,7 @@ public sealed class BDToolRuntime
         IApplicationGateway gateway,
         IActivityQuery activityQuery,
         IFormationService formation,
+        ICapabilityInspector capabilities,
         string projectPath,
         string catalogPath)
     {
@@ -26,6 +28,7 @@ public sealed class BDToolRuntime
         Gateway = gateway;
         ActivityQuery = activityQuery;
         Formation = formation;
+        Capabilities = capabilities;
         ProjectPath = projectPath;
         CatalogPath = catalogPath;
     }
@@ -47,6 +50,9 @@ public sealed class BDToolRuntime
 
     /// <summary>M7 Formation 服务；CLI 经组合根访问，不直接依赖 Orchestration。</summary>
     public IFormationService Formation { get; }
+
+    /// <summary>页面能力快照入口；表现层不直接读取 Provider。</summary>
+    public ICapabilityInspector Capabilities { get; }
 
     /// <summary>解析后的项目路径。</summary>
     public string ProjectPath { get; }

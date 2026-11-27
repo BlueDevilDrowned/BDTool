@@ -1,0 +1,24 @@
+{
+  "name": "Graphite Studio Dark",
+  "basedOn": "dark",
+  "colors": {
+    "background.canvas": "#111418",
+    "background.primary": "#171C23",
+    "background.secondary": "#1D232C",
+    "background.hover": "#242B36",
+    "border.default": "#2A323D",
+    "border.strong": "#3A4553",
+    "text.primary": "#E7EAF0",
+    "text.secondary": "#9AA5B4",
+    "text.tertiary": "#6F7B8B",
+    "accent.default": "#4C8DFF",
+    "accent.hover": "#6BA2FF",
+    "accent.subtle": "#1B3159",
+    "success": "#3FB950",
+    "warning": "#D29922",
+    "danger": "#F85149",
+    "uncertain": "#B083F0",
+    "info": "#37B4E8",
+    "overlay.scrim": "#99000000"
+  }
+}

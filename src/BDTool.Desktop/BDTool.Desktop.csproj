@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>BDTool.Desktop</RootNamespace>
+    <AssemblyName>BDTool.Desktop</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BDTool.Composition\BDTool.Composition.csproj" />
+    <ProjectReference Include="..\BDTool.Presentation\BDTool.Presentation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\catalog\operations.json" Link="catalog\operations.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\skills\**\*" Link="skills\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\agents\*.toml" Link="agents\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\design\tokens.json" Link="design\tokens.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\design\themes\*.json" Link="design\themes\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

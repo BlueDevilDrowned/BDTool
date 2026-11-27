@@ -1,11 +1,11 @@
 # BDTool
 
-BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool。**M3 已完成并真实验证**：新增只读 `project.asset-snapshot` 与单 Prefab 根对象 activeSelf 写入 `project.prefab-set-active`，目录 12 个操作全部 `available`；已在 Unity `6000.6.0f1` fixture 上跑通资产快照、dry-run、真实写入、stale CAS 拒绝与回滚恢复，Core EditMode 测试 25/25 通过。**M4 已完成**：提供可安装到项目 `.agents/skills` 的 `bdtool-overview` 与 `bdtool-unity-work` Codex Skill，包含防覆盖安装、Agent 使用边界和真实 CLI 验证。**M5 已完成**：新增 `bdtool-mcp` stdio Adapter，把 12 个 catalog 操作映射为高层 MCP Tool，并提供两个只读 Resource 与 Codex/JSON 配置生成。**M6 已完成并真实验证**：新增 `BDTool.Provider.Official`，通过 Unity 官方 `com.unity.pipeline@0.10.0-exp.1` 公共 HTTP API 支持状态、场景层级、Prefab 快照和 activeSelf 写入。**M7 已完成并真实验证**：Formation 支持人工闭环、原生子智能体派发包、真实 AgentId 绑定、结果回收、取消/DeliveryUnknown、用户授权下的独立 SessionId 绑定，以及项目级 Agent Profile 安装；应用自身不调用宿主私有接口，也不伪造 Agent/Session 身份。
+BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace Provider 接入真实 Application：可查询操作目录与项目上下文，并在项目内执行文本读写、搜索、指纹与带 CAS 的原子写入。**M2 已完成**：新增可选的 `BDTool.Provider.Akio`，通过 `unity-cli` 在真实 Unity 6（6000.6.0f1）上验证 `system ping`、`project.inspect` 与 `project.probe` custom tool。**M3 已完成并真实验证**：新增只读 `project.asset-snapshot` 与单 Prefab 根对象 activeSelf 写入 `project.prefab-set-active`，目录 12 个操作全部 `available`；已在 Unity `6000.6.0f1` fixture 上跑通资产快照、dry-run、真实写入、stale CAS 拒绝与回滚恢复，Core EditMode 测试 25/25 通过。**M4 已完成**：提供可安装到项目 `.agents/skills` 的 `bdtool-overview` 与 `bdtool-unity-work` Codex Skill，包含防覆盖安装、Agent 使用边界和真实 CLI 验证。**M5 已完成**：新增 `bdtool-mcp` stdio Adapter，把 12 个 catalog 操作映射为高层 MCP Tool，并提供两个只读 Resource 与 Codex/JSON 配置生成。**M6 已完成并真实验证**：新增 `BDTool.Provider.Official`，通过 Unity 官方 `com.unity.pipeline@0.10.0-exp.1` 公共 HTTP API 支持状态、场景层级、Prefab 快照和 activeSelf 写入。**M7 已完成并真实验证**：Formation 支持人工闭环、原生子智能体派发包、真实 AgentId 绑定、结果回收、取消/DeliveryUnknown、用户授权下的独立 SessionId 绑定，以及项目级 Agent Profile 安装；应用自身不调用宿主私有接口，也不伪造 Agent/Session 身份。**M8.1 已完成**：建立 UI 无关 Presentation、八模块 WPF Shell、统一状态语义、Graphite Studio Token/深浅主题、共享组件、命令面板骨架和可重复视觉捕获。
 
 ## 当前状态
 
 - 已冻结解决方案、程序集、命名空间与 CLI 可执行名：`BDTool` / `bdtool`。
-- 产品版本 `1.2.0`，里程碑 `M7`；`BDToolIdentity` 与 `Directory.Build.props` 为 `1.2.0`。Akio Editor Provider 行为未变，仍声明实现版本 `0.3.0`。
+- 产品版本 `1.3.0`，里程碑 `M8.1`；`BDToolIdentity` 与 `Directory.Build.props` 为 `1.3.0`。Akio Editor Provider 行为未变，仍声明实现版本 `0.3.0`。
 - 目录共十二个操作：全部已注册 Handler 并标记为 `available`，包括 M1 的 `system.doctor`、`operations.list`、`operations.describe`、`project.context`、`workspace.read`、`workspace.search`、`workspace.fingerprint`、`workspace.apply`，M2 的 `project.inspect`、`project.probe`，以及 M3 的 `project.asset-snapshot`、`project.prefab-set-active`。
 - M4 新增两个项目级 Skill。安装目标固定为 `<project>/.agents/skills/<skill>`；只有带合法 `.bdtool-managed` 标记的目录可被更新，未受管同名目录会使整次安装失败且不写入另一个 Skill。
 - M5 新增 `BDTool.Mcp`，可执行名为 `bdtool-mcp`。MCP 工具直接来自 catalog，输入/输出 Schema 与 CLI 相同；调用统一进入 Application Gateway，并写 `source=mcp` 的 Activity。
@@ -24,6 +24,7 @@ BDTool 是面向个人 AI 工作流的本地工具。M1 已把本地 Workspace P
 - M7.2 生成 `Native` 叶子派发包；只有 Codex Coordinator 调用宿主工具并把真实 AgentId 回填后才能进入 Running。预算耗尽返回冲突，DeliveryUnknown 以退出码 `8` 记录且禁止自动重派。
 - M7.3 只在 API/CLI 显式携带用户授权且 Formation `sessionMax` 允许时生成 Session 派发包；真实 SessionId 回填后才进入 Running。M7.4 跨实例仍明确不支持。
 - `bdtool agents install` 把固定的 Coordinator、Implementer、Reviewer 与 Session Worker Profile 安装到项目 `.codex/agents`；未受管同名文件冲突时全量预检、零写入。
+- `BDTool.Presentation` 提供 Overview、Unity、Codex、Operations、Activity、Artifacts、Formation、Settings 八个 UI 模块契约；`BDTool.Desktop` 只负责 WPF 绑定与组合根。
 
 ## 目录
 
@@ -38,14 +39,17 @@ src/BDTool.Operations       目录加载/校验、输入解析与十二个 Handl
 src/BDTool.Activity         Activity 存储与脱敏策略
 src/BDTool.Application      用例运行时、能力检查、超时与退出码映射
 src/BDTool.Orchestration    Formation 文件仓储、人工状态机与范围校验
+src/BDTool.Presentation     UI 无关模块、页面、状态和命令模型
+src/BDTool.Desktop          WPF Shell、主题、共享控件与视觉捕获
 src/BDTool.Provider.Local   本地 Workspace Provider（仅依赖 Contracts/Core）
 src/BDTool.Provider.Akio    可选 unity-cli 只读 Editor Provider（仅依赖 Contracts）
 src/BDTool.Provider.Official 官方 com.unity.pipeline Editor Provider（仅依赖 Contracts）
 src/BDTool.Composition      唯一组合根
 src/BDTool.Cli              bdtool 可执行入口
 src/BDTool.Mcp              bdtool-mcp stdio MCP Adapter
-tests/BDTool.Tests          单元、组合、CLI、MCP 与架构测试
-docs/decisions              决策记录（0001-0011）
+tests/BDTool.Tests          单元、组合、CLI、MCP、Presentation 与架构测试
+design                      Graphite Studio Token 与主题数据
+docs/decisions              决策记录（0001-0012）
 ```
 
 ## 构建与测试
@@ -54,6 +58,7 @@ docs/decisions              决策记录（0001-0011）
 dotnet build BDTool.sln -c Release
 dotnet test BDTool.sln -c Release
 dotnet format BDTool.sln --verify-no-changes --no-restore
+dotnet run --project src/BDTool.Desktop -- <project-path>
 ```
 
 架构测试直接解析真实 `.csproj` 的 `ProjectReference`，验证 Provider 依赖方向与 Composition 的唯一引用位置。
@@ -218,6 +223,16 @@ bdtool agents install ...
 
 阶段设计与限制详见 [0010](docs/decisions/0010-bdtool-m7-1-formation.md) 与 [0011](docs/decisions/0011-bdtool-m7-runtime-formations.md)。
 
+## M8.1 Shell 与 Design System（已完成）
+
+- `BDTool.Presentation` 不引用 WPF、Provider、UnityEditor 或 Codex SDK；模块通过 `IUiModule` 注册。
+- `BDTool.Desktop` 仅引用 Presentation 与 Composition，使用标准 Windows 标题栏和 PerMonitorV2 DPI 清单。
+- 首版八模块导航、当前页、Inspector 和 Activity 抽屉骨架已接通 Shell ViewModel。
+- Token 来源为 `design/tokens.json`；Dark/Light 资源、共享状态徽标、PageHeader 和 StatePanel 使用统一语义。
+- `BDTOOL_CAPTURE_PATH` 可让真实 WPF Shell 以 1440×900 离屏渲染，支持后续 1280/1440/1920 视觉回归。
+- M8.1 真实截图：`E:\AI\BDTools\M7TestArea\visual-m8\m8.1-shell-dark-1440x900-offscreen.png`。
+- Unity、Codex、Activity、Artifacts 和 Formation 当前仍是占位页，真实数据接入属于 M8.2/M8.3/M8.4，不把占位状态描述成完成业务。
+
 ## M5 MCP Adapter（已完成）
 
 ### 工具与 Resource
@@ -322,11 +337,11 @@ bdtool-mcp config --project <项目路径> --format codex
 - M4 Skill 安装只支持项目级 `.agents/skills`，不做用户级安装、全局 Skill 替换或自动修改 Codex 配置。
 - M5 MCP 只实现 stdio，不提供 HTTP transport、MCP Prompt、资源订阅或低层 Editor 工具；MCP Resource 当前为固定 URI，不提供服务端资源变更通知。
 - M6 Official Provider 依赖 Unity 官方 `com.unity.pipeline` 的公开实例描述与 HTTP 命令 API，不修改或再分发官方包。
-- M7 不提供跨实例调度、自动递归、Formation UI 或 MCP Formation Tool；应用只生成派发包，实际 Agent/Session 创建仍由 Codex 宿主工具执行。
+- M7 不提供跨实例调度、自动递归、Formation UI 或 MCP Formation Tool；应用只生成派发包，实际 Agent/Session 创建仍由 Codex 宿主工具执行。M8.1 只完成 Shell/Design System，业务面板数据接入仍待后续子阶段。
 - Official 写入通过固定的 `script eval` 脚本完成，不宣称 Unity Undo；结果中 `undoGroup` 为空，保存、强制导入、回读与磁盘 SHA 仍为完成证据。
 - Akio 专属 `project.probe` 在 Official Provider 上明确返回 `CAPABILITY_UNSUPPORTED`；不跨 Provider fallback。
 - 真实 Unity 6 验证使用 `E:\AI\BDTools\M2TestArea`（M2）与 `E:\AI\BDTools\M3TestArea\Unity6Fixture`（M3）fixture，原 TTF2 未修改；验证依赖本机 `unity-cli`/bridge。
 - 未安装 `unity-cli` 或 Editor 未就绪时，Editor 能力返回未就绪/不支持，M1 本地操作不受影响。
 - 不支持二进制写入、流式传输、跨进程强一致 CAS 或 CLI `--timeout` 覆盖；`workspace.apply` 编码后上限 1 MiB。
 - Activity 列表最多返回最近 100 条摘要；不持久化 Started 中间态。
-- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md)、[0005](docs/decisions/0005-bdtool-m2-akio-editor.md)、[0006](docs/decisions/0006-bdtool-m3-unity-core.md)、[0007](docs/decisions/0007-bdtool-m4-skills.md)、[0008](docs/decisions/0008-bdtool-m5-mcp.md)、[0009](docs/decisions/0009-bdtool-m6-official-provider.md)、[0010](docs/decisions/0010-bdtool-m7-1-formation.md) 与 [0011](docs/decisions/0011-bdtool-m7-runtime-formations.md)。
+- 详细设计见 [0003](docs/decisions/0003-bdtool-m1-workspace-contract.md)、[0004](docs/decisions/0004-bdtool-m1-runtime.md)、[0005](docs/decisions/0005-bdtool-m2-akio-editor.md)、[0006](docs/decisions/0006-bdtool-m3-unity-core.md)、[0007](docs/decisions/0007-bdtool-m4-skills.md)、[0008](docs/decisions/0008-bdtool-m5-mcp.md)、[0009](docs/decisions/0009-bdtool-m6-official-provider.md)、[0010](docs/decisions/0010-bdtool-m7-1-formation.md)、[0011](docs/decisions/0011-bdtool-m7-runtime-formations.md) 与 [0012](docs/decisions/0012-bdtool-m8-1-shell.md)。

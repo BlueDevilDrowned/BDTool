@@ -1,0 +1,215 @@
+<Window
+    x:Class="BDTool.Desktop.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="clr-namespace:BDTool.Desktop.Controls"
+    xmlns:views="clr-namespace:BDTool.Desktop.Views"
+    xmlns:vm="clr-namespace:BDTool.Presentation.ViewModels;assembly=BDTool.Presentation"
+    Title="BDTool Studio"
+    Width="1440"
+    Height="900"
+    MinWidth="1100"
+    MinHeight="720"
+    Background="{StaticResource brush.background.canvas}"
+    FontFamily="{StaticResource font.ui}"
+    TextOptions.TextFormattingMode="Display">
+    <Window.InputBindings>
+        <KeyBinding
+            Key="K"
+            Command="{Binding ToggleCommandPaletteCommand}"
+            Modifiers="Control" />
+        <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
+    </Window.InputBindings>
+    <Window.Resources>
+        <DataTemplate DataType="{x:Type vm:PlaceholderPageViewModel}">
+            <views:PlaceholderPageView />
+        </DataTemplate>
+    </Window.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="52" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="180" />
+        </Grid.RowDefinitions>
+
+        <Border
+            Grid.Row="0"
+            Padding="18,0"
+            Background="{StaticResource brush.background.primary}"
+            BorderBrush="{StaticResource brush.border.default}"
+            BorderThickness="0,0,0,1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="BDTool Studio" />
+                    <TextBlock
+                        MaxWidth="680"
+                        Style="{StaticResource CaptionText}"
+                        Text="{Binding ProjectPath}"
+                        TextTrimming="CharacterEllipsis"
+                        ToolTip="{Binding ProjectPath}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="16,0" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource CaptionText}" Text="UNITY" />
+                    <TextBlock Style="{StaticResource SecondaryText}" Text="{Binding UnityStatus}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Margin="16,0" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource CaptionText}" Text="PROVIDER" />
+                    <TextBlock Style="{StaticResource SecondaryText}" Text="{Binding ProviderStatus}" />
+                </StackPanel>
+                <Button
+                    Grid.Column="3"
+                    MinWidth="112"
+                    Command="{Binding ToggleCommandPaletteCommand}"
+                    Content="命令  Ctrl+K" />
+            </Grid>
+        </Border>
+
+        <Border
+            Grid.Row="1"
+            Padding="16,9"
+            Background="{StaticResource brush.danger}"
+            Visibility="{Binding HasGlobalError, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <TextBlock Foreground="White" Text="{Binding GlobalError}" TextWrapping="Wrap" />
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="320" />
+            </Grid.ColumnDefinitions>
+
+            <Border
+                Grid.Column="0"
+                Background="{StaticResource brush.background.primary}"
+                BorderBrush="{StaticResource brush.border.default}"
+                BorderThickness="0,0,1,0">
+                <DockPanel>
+                    <TextBlock
+                        Margin="18,20,18,10"
+                        DockPanel.Dock="Top"
+                        Style="{StaticResource CaptionText}"
+                        Text="工作区" />
+                    <ListBox
+                        DisplayMemberPath="Title"
+                        ItemsSource="{Binding NavigationItems}"
+                        SelectedItem="{Binding SelectedNavigation}" />
+                </DockPanel>
+            </Border>
+
+            <ContentControl
+                Grid.Column="1"
+                Background="{StaticResource brush.background.canvas}"
+                Content="{Binding CurrentPage}"
+                Focusable="False" />
+
+            <Border
+                Grid.Column="2"
+                Padding="18"
+                Background="{StaticResource brush.background.primary}"
+                BorderBrush="{StaticResource brush.border.default}"
+                BorderThickness="1,0,0,0">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource CaptionText}" Text="INSPECTOR" />
+                    <TextBlock
+                        Margin="0,12,0,0"
+                        Style="{StaticResource SectionTitleText}"
+                        Text="{Binding SelectedNavigation.Title}" />
+                    <TextBlock
+                        Margin="0,6,0,0"
+                        Style="{StaticResource SecondaryText}"
+                        Text="{Binding CurrentPage.Subtitle}"
+                        TextWrapping="Wrap" />
+                    <Separator Margin="0,18" Background="{StaticResource brush.border.default}" />
+                    <TextBlock Style="{StaticResource CaptionText}" Text="PROJECT" />
+                    <TextBlock
+                        Margin="0,6,0,0"
+                        Style="{StaticResource SecondaryText}"
+                        Text="{Binding ProjectPath}"
+                        TextTrimming="CharacterEllipsis"
+                        ToolTip="{Binding ProjectPath}" />
+                    <TextBlock
+                        Margin="0,20,0,0"
+                        Style="{StaticResource SecondaryText}"
+                        Text="M8.1 已建立统一 Shell、模块注册、状态语义与主题 Token。Unity、Activity、Codex 和 Formation 的真实数据将在后续阶段接入。"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Border
+            Grid.Row="3"
+            Background="{StaticResource brush.background.primary}"
+            BorderBrush="{StaticResource brush.border.default}"
+            BorderThickness="0,1,0,0">
+            <Grid Margin="18,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <DockPanel>
+                    <TextBlock
+                        DockPanel.Dock="Left"
+                        Style="{StaticResource SectionTitleText}"
+                        Text="Activity" />
+                    <TextBlock
+                        Margin="12,3,0,0"
+                        DockPanel.Dock="Left"
+                        Style="{StaticResource CaptionText}"
+                        Text="M8.2 接入实时审计" />
+                </DockPanel>
+                <controls:StatePanel
+                    Grid.Row="1"
+                    Title="尚无 UI 会话 Activity"
+                    Message="命令首次通过 Desktop 执行后，这里将按真实记录显示来源、状态、耗时与证据。" />
+            </Grid>
+        </Border>
+
+        <Grid
+            Grid.RowSpan="4"
+            Panel.ZIndex="20"
+            Background="{StaticResource brush.overlay.scrim}"
+            Visibility="{Binding IsCommandPaletteOpen, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Border
+                Width="620"
+                Padding="18"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Margin="0,110,0,0"
+                Style="{StaticResource SurfaceBorder}">
+                <StackPanel>
+                    <DockPanel>
+                        <TextBlock
+                            DockPanel.Dock="Left"
+                            Style="{StaticResource SectionTitleText}"
+                            Text="命令面板" />
+                        <Button
+                            DockPanel.Dock="Right"
+                            Command="{Binding CloseCommandPaletteCommand}"
+                            Content="Esc" />
+                    </DockPanel>
+                    <TextBox
+                        Margin="0,12,0,8"
+                        Text="{Binding CommandSearch, UpdateSourceTrigger=PropertyChanged}"
+                        ToolTip="搜索模块和命令" />
+                    <ListBox
+                        MaxHeight="360"
+                        DisplayMemberPath="Title"
+                        ItemsSource="{Binding NavigationItems}"
+                        SelectedItem="{Binding SelectedNavigation}" />
+                    <TextBlock
+                        Margin="0,8,0,0"
+                        Style="{StaticResource CaptionText}"
+                        Text="M8.1 骨架：模块跳转可用，操作命令将在后续阶段注册。" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

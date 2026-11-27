@@ -1,0 +1,24 @@
+{
+  "name": "Graphite Studio Light",
+  "basedOn": "light",
+  "colors": {
+    "background.canvas": "#F3F5F8",
+    "background.primary": "#FFFFFF",
+    "background.secondary": "#E9EDF2",
+    "background.hover": "#DDE3EA",
+    "border.default": "#CDD4DD",
+    "border.strong": "#AEB8C5",
+    "text.primary": "#18202A",
+    "text.secondary": "#4C5968",
+    "text.tertiary": "#738091",
+    "accent.default": "#246FDB",
+    "accent.hover": "#185DBD",
+    "accent.subtle": "#DCEAFF",
+    "success": "#1F883D",
+    "warning": "#9A6700",
+    "danger": "#CF222E",
+    "uncertain": "#8250DF",
+    "info": "#0969DA",
+    "overlay.scrim": "#66000000"
+  }
+}

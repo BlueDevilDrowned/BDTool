@@ -154,6 +154,7 @@ public static class BDToolComposition
             gateway,
             activityStore,
             formation,
+            capabilities,
             projectPath,
             catalogPath);
     }
