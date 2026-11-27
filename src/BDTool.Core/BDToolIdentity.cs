@@ -16,5 +16,5 @@ public static class BDToolIdentity
     public const string Version = "1.2.0";
 
     /// <summary>当前里程碑标识，用于快照和诊断输出。</summary>
-    public const string Milestone = "M7.1";
+    public const string Milestone = "M7";
 }

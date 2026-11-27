@@ -7,8 +7,8 @@ using BDTool.Contracts.Operations;
 namespace BDTool.Orchestration;
 
 /// <summary>
-/// M7.1 人工编队服务。服务只编排锁、读写和回执；输入规则由 ScopeValidator、
-/// 生命周期迁移由 StateMachine 负责。M7.1 不创建 Agent，也不会写 Activity。
+/// M7 Formation 服务。服务只编排锁、读写和回执；输入规则由 ScopeValidator、
+/// 生命周期迁移由 StateMachine 负责。原生派发只生成申请，不直接创建宿主 Agent。
 /// </summary>
 public sealed class FileFormationService : IFormationService
 {
@@ -118,6 +118,105 @@ public sealed class FileFormationService : IFormationService
             },
             cancellationToken);
 
+    public Task<OperationResult<FormationCommandData>> PrepareTaskDispatchAsync(
+        PrepareTaskDispatchRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            request.FormationId,
+            request.RequestId,
+            string.Equals(request.DispatchMode, DispatchModes.Session, StringComparison.Ordinal)
+                ? FormationRequestCommands.PrepareSessionDispatch
+                : FormationRequestCommands.PrepareNativeDispatch,
+            BuildEntityId(request.FormationId, "task", request.TaskId),
+            request,
+            formation => PrepareRuntimeDispatch(formation, request),
+            cancellationToken,
+            formation => BuildSpawnRequest(formation, request));
+
+    public Task<OperationResult<FormationCommandData>> BindTaskRuntimeAsync(
+        BindTaskRuntimeRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            request.FormationId,
+            request.RequestId,
+            FormationRequestCommands.BindRuntimeIdentity,
+            BuildEntityId(request.FormationId, "task", request.TaskId),
+            request,
+            formation => BindRuntime(formation, request),
+            cancellationToken);
+
+    public Task<OperationResult<FormationCommandData>> CollectTaskResultAsync(
+        CollectFormationTaskResultRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            request.FormationId,
+            request.RequestId,
+            FormationRequestCommands.CollectResult,
+            BuildEntityId(request.FormationId, "task", request.TaskId),
+            request,
+            formation => CollectRuntimeResult(formation, request),
+            cancellationToken);
+
+    public Task<OperationResult<FormationCommandData>> MarkTaskUnsupportedAsync(
+        ReportTaskRuntimeFailureRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            request.FormationId,
+            request.RequestId,
+            FormationRequestCommands.MarkUnsupported,
+            BuildEntityId(request.FormationId, "task", request.TaskId),
+            request,
+            formation =>
+            {
+                _validator.ValidateIdentifier(request.TaskId, "taskId");
+                FormationStateMachine.MarkUnsupported(
+                    formation,
+                    request.TaskId,
+                    request.Reason);
+            },
+            cancellationToken,
+            terminalResult: formation => FailureCommand(
+                formation,
+                request.RequestId,
+                ErrorCodes.CapabilityUnsupported,
+                "Codex 宿主未提供所需的原生派发能力。",
+                OperationStatus.Failed,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["taskId"] = request.TaskId,
+                    ["reason"] = request.Reason
+                }));
+
+    public Task<OperationResult<FormationCommandData>> MarkTaskDeliveryUnknownAsync(
+        ReportTaskRuntimeFailureRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            request.FormationId,
+            request.RequestId,
+            FormationRequestCommands.MarkDeliveryUnknown,
+            BuildEntityId(request.FormationId, "task", request.TaskId),
+            request,
+            formation =>
+            {
+                _validator.ValidateIdentifier(request.TaskId, "taskId");
+                FormationStateMachine.MarkDeliveryUnknown(
+                    formation,
+                    request.TaskId,
+                    request.Reason);
+            },
+            cancellationToken,
+            terminalResult: formation => FailureCommand(
+                formation,
+                request.RequestId,
+                ErrorCodes.ExecutionUncertain,
+                "Agent 结果无法确认；已记录 DeliveryUnknown，禁止自动重派。",
+                OperationStatus.Uncertain,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["taskId"] = request.TaskId,
+                    ["reason"] = request.Reason
+                }));
+
     public Task<OperationResult<FormationCommandData>> CancelTaskAsync(
         TaskCommandRequest request,
         CancellationToken cancellationToken) =>
@@ -131,6 +230,27 @@ public sealed class FileFormationService : IFormationService
             {
                 _validator.ValidateIdentifier(request.TaskId, "taskId");
                 FormationStateMachine.CancelTask(formation, request.TaskId);
+            },
+            cancellationToken);
+
+    public Task<OperationResult<FormationCommandData>> ConfirmTaskCancellationAsync(
+        ConfirmTaskCancellationRequest request,
+        CancellationToken cancellationToken) =>
+        MutateAsync(
+            request.FormationId,
+            request.RequestId,
+            FormationRequestCommands.ConfirmTaskCancellation,
+            BuildEntityId(request.FormationId, "task", request.TaskId),
+            request,
+            formation =>
+            {
+                _validator.ValidateIdentifier(request.TaskId, "taskId");
+                FormationStateMachine.ConfirmTaskCancellation(
+                    formation,
+                    request.TaskId,
+                    _validator.RequireText(
+                        request.CancellationEvidence,
+                        "cancellationEvidence"));
             },
             cancellationToken);
 
@@ -326,7 +446,9 @@ public sealed class FileFormationService : IFormationService
         string entityId,
         TRequest request,
         Action<FormationData> mutation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<FormationData, FormationCommandData>? commandFactory = null,
+        Func<FormationData, OperationResult<FormationCommandData>>? terminalResult = null)
         where TRequest : class
     {
         try
@@ -347,7 +469,11 @@ public sealed class FileFormationService : IFormationService
                 entityId,
                 payloadSha256))
             {
-                return SuccessCommand(formation, requestId, replayed: true);
+                return SuccessCommand(
+                    formation,
+                    requestId,
+                    replayed: true,
+                    commandFactory);
             }
 
             FormationRequestLedger.EnsureUniqueRequestId(formation, requestId);
@@ -362,7 +488,12 @@ public sealed class FileFormationService : IFormationService
                 payloadSha256,
                 now);
             await _repository.WriteAsync(formation, cancellationToken).ConfigureAwait(false);
-            return SuccessCommand(formation, requestId, replayed: false);
+            return terminalResult?.Invoke(formation)
+                ?? SuccessCommand(
+                    formation,
+                    requestId,
+                    replayed: false,
+                    commandFactory);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -399,6 +530,10 @@ public sealed class FileFormationService : IFormationService
 
         _validator.ValidateChoice(request.Role, SeatRoles.All, "role");
         _validator.ValidateChoice(request.Access, WorkspaceAccesses.All, "access");
+        _validator.ValidateChoice(
+            request.DispatchMode,
+            new[] { DispatchModes.Manual, DispatchModes.Native, DispatchModes.Session },
+            "dispatchMode");
         var displayName = _validator.RequireText(request.DisplayName, "displayName");
         if (!string.Equals(request.Role, SeatRoles.Executor, StringComparison.Ordinal)
             && string.Equals(request.Access, WorkspaceAccesses.Write, StringComparison.Ordinal))
@@ -413,6 +548,14 @@ public sealed class FileFormationService : IFormationService
                 "subagentMax");
         }
 
+        if (request.DispatchMode is DispatchModes.Native or DispatchModes.Session
+            && request.SubagentMax != 0)
+        {
+            throw Invalid(
+                "Native/Session 执行席位是叶子 Agent，subagentMax 必须为 0。",
+                "subagentMax");
+        }
+
         var writePaths = _validator.NormalizeWorkspace(
             request.Access,
             request.WritePaths,
@@ -423,7 +566,7 @@ public sealed class FileFormationService : IFormationService
             Id = request.SeatId,
             Role = request.Role,
             DisplayName = displayName,
-            DispatchMode = DispatchModes.Manual,
+            DispatchMode = request.DispatchMode,
             AgentId = string.Empty,
             SessionId = string.Empty,
             AgentProfile = request.AgentProfile ?? string.Empty,
@@ -523,6 +666,7 @@ public sealed class FileFormationService : IFormationService
         var attempt = FormationStateMachine.RequireActiveAttempt(
             task,
             AttemptStates.ManualInProgress);
+
         var now = DateTimeOffset.UtcNow;
         var submission = new FormationSubmissionData
         {
@@ -538,6 +682,282 @@ public sealed class FileFormationService : IFormationService
             CreatedAt = now
         };
         FormationStateMachine.Submit(formation, request.TaskId, submission);
+    }
+
+    private void CollectRuntimeResult(
+        FormationData formation,
+        CollectFormationTaskResultRequest request)
+    {
+        _validator.ValidateIdentifier(request.TaskId, "taskId");
+        var coordinatorId = _validator.RequireActorId(request.ActorId);
+        var task = FormationStateMachine.RequireTask(formation, request.TaskId);
+        var attempt = FormationStateMachine.RequireActiveAttempt(task, AttemptStates.Running);
+        var attributedAgentId = string.IsNullOrWhiteSpace(attempt.AgentId)
+            ? attempt.SessionId
+            : attempt.AgentId;
+        var hostResult = ValidateHostResult(request.HostResult);
+        if (!string.Equals(hostResult.ThreadId, attributedAgentId, StringComparison.Ordinal))
+        {
+            throw Conflict(
+                "HostResult.ThreadId 与绑定身份不一致。",
+                hostResult.ThreadId,
+                "hostResult.threadId");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var submission = new FormationSubmissionData
+        {
+            Id = FormationRepository.NextId("submission"),
+            AttemptId = attempt.Id,
+            RequestId = request.RequestId,
+            ActorKind = FormationActorKinds.Coordinator,
+            ActorId = coordinatorId,
+            AttributedAgentId = attributedAgentId,
+            HostResult = hostResult,
+            Summary = _validator.RequireText(request.Summary, "summary"),
+            ChangedPaths = _validator.NormalizeChangedPaths(task, request.ChangedPaths),
+            Artifacts = _validator.ValidateArtifacts(request.Artifacts),
+            Unverified = _validator.CleanStrings(request.Unverified),
+            CreatedAt = now
+        };
+        FormationStateMachine.CollectRuntimeResult(formation, request.TaskId, submission);
+    }
+
+    private void PrepareRuntimeDispatch(
+        FormationData formation,
+        PrepareTaskDispatchRequest request)
+    {
+        _validator.ValidateIdentifier(request.TaskId, "taskId");
+        _validator.ValidateChoice(
+            request.DispatchMode,
+            new[] { DispatchModes.Native, DispatchModes.Session },
+            "dispatchMode");
+        if (string.Equals(request.DispatchMode, DispatchModes.Session, StringComparison.Ordinal)
+            && !request.UserAuthorized)
+        {
+            throw Conflict(
+                "创建独立 Session 前必须获得用户明确授权。",
+                "USER_AUTHORIZATION_REQUIRED",
+                "userAuthorized");
+        }
+
+        var actorId = _validator.RequireActorId(request.ActorId);
+        var task = FormationStateMachine.RequireTask(formation, request.TaskId);
+        var sessionAuthorizationId = string.Empty;
+        if (string.Equals(request.DispatchMode, DispatchModes.Session, StringComparison.Ordinal))
+        {
+            var quote = _validator.RequireText(
+                request.AuthorizationQuote,
+                "authorizationQuote");
+            var scope = string.IsNullOrWhiteSpace(request.AuthorizationScope)
+                ? task.Id
+                : request.AuthorizationScope.Trim();
+            var authorization = new FormationSessionAuthorizationData
+            {
+                Id = FormationRepository.NextId("session-auth"),
+                RequestId = request.RequestId,
+                AuthorizedBy = actorId,
+                GrantedAt = DateTimeOffset.UtcNow,
+                Scope = scope,
+                SourceQuote = quote
+            };
+            formation.SessionAuthorizations.Add(authorization);
+            sessionAuthorizationId = authorization.Id;
+        }
+
+        EnsureDispatchBudget(formation, request.DispatchMode);
+        FormationStateMachine.PrepareRuntimeDispatch(
+            formation,
+            request.TaskId,
+            request.DispatchMode,
+            request.RequestId,
+            actorId,
+            sessionAuthorizationId,
+            Math.Max(1, formation.Budget.MaxDepth - 1));
+    }
+
+    private void BindRuntime(
+        FormationData formation,
+        BindTaskRuntimeRequest request)
+    {
+        _validator.ValidateIdentifier(request.TaskId, "taskId");
+        var attestation = ValidateHostAttestation(
+            request.HostAttestation,
+            request.BindingEvidence);
+        FormationStateMachine.BindRuntime(
+            formation,
+            request.TaskId,
+            request.AgentId,
+            request.SessionId,
+            attestation);
+    }
+
+    private FormationHostAttestationData ValidateHostAttestation(
+        FormationHostAttestationData? attestation,
+        string? legacyEvidence)
+    {
+        if (attestation is null)
+        {
+            throw Invalid("hostAttestation 不能为空。", "hostAttestation");
+        }
+
+        if (attestation.CapturedAt == default)
+        {
+            throw Invalid("hostAttestation.capturedAt 不能为空。", "hostAttestation.capturedAt");
+        }
+
+        return new FormationHostAttestationData
+        {
+            HostId = _validator.RequireText(attestation.HostId, "hostAttestation.hostId"),
+            ToolCallId = _validator.RequireText(
+                attestation.ToolCallId,
+                "hostAttestation.toolCallId"),
+            CapturedAt = attestation.CapturedAt,
+            RawResultSha256 = _validator.ValidateSha256(
+                attestation.RawResultSha256,
+                "hostAttestation.rawResultSha256"),
+            Evidence = string.IsNullOrWhiteSpace(attestation.Evidence)
+                ? _validator.RequireText(legacyEvidence, "bindingEvidence")
+                : attestation.Evidence.Trim()
+        };
+    }
+
+    private FormationHostResultReferenceData ValidateHostResult(
+        FormationHostResultReferenceData? hostResult)
+    {
+        if (hostResult is null)
+        {
+            throw Invalid("hostResult 不能为空。", "hostResult");
+        }
+
+        if (hostResult.CollectedAt == default)
+        {
+            throw Invalid("hostResult.collectedAt 不能为空。", "hostResult.collectedAt");
+        }
+
+        return new FormationHostResultReferenceData
+        {
+            HostId = _validator.RequireText(hostResult.HostId, "hostResult.hostId"),
+            ThreadId = _validator.RequireText(hostResult.ThreadId, "hostResult.threadId"),
+            TurnId = hostResult.TurnId?.Trim() ?? string.Empty,
+            MessageId = hostResult.MessageId?.Trim() ?? string.Empty,
+            CollectedAt = hostResult.CollectedAt,
+            ContentSha256 = _validator.ValidateSha256(
+                hostResult.ContentSha256,
+                "hostResult.contentSha256"),
+            AttestedBy = _validator.RequireText(
+                hostResult.AttestedBy,
+                "hostResult.attestedBy")
+        };
+    }
+
+    private static void EnsureDispatchBudget(
+        FormationData formation,
+        string dispatchMode)
+    {
+        var activeCount = formation.Tasks
+            .SelectMany(task => task.Attempts)
+            .Count(attempt =>
+                attempt.CompletedAt is null
+                && string.Equals(
+                    attempt.DispatchMode,
+                    dispatchMode,
+                    StringComparison.Ordinal));
+        var limit = string.Equals(dispatchMode, DispatchModes.Session, StringComparison.Ordinal)
+            ? Math.Min(formation.Budget.SessionMax, formation.Budget.TreeSessionMax)
+            : formation.Budget.SubagentMax;
+        if (activeCount >= limit)
+        {
+            throw Conflict(
+                dispatchMode + " 派发预算已耗尽。",
+                activeCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + "/"
+                    + limit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "budget");
+        }
+    }
+
+    private FormationCommandData BuildSpawnRequest(
+        FormationData formation,
+        PrepareTaskDispatchRequest request)
+    {
+        var task = FormationStateMachine.RequireTask(formation, request.TaskId);
+        var seat = FormationStateMachine.RequireSeat(
+            formation,
+            task.ExecutorSeatId,
+            SeatRoles.Executor);
+        var attempt = task.Attempts.LastOrDefault(item =>
+            string.Equals(
+                item.RequestId,
+                request.RequestId,
+                StringComparison.Ordinal))
+            ?? throw Conflict(
+                "找不到本次派发对应的 Attempt。",
+                request.RequestId,
+                "requestId");
+        var profile = !string.IsNullOrWhiteSpace(request.AgentProfile)
+            ? request.AgentProfile
+            : !string.IsNullOrWhiteSpace(seat.AgentProfile)
+                ? seat.AgentProfile
+                : string.Equals(request.DispatchMode, DispatchModes.Session, StringComparison.Ordinal)
+                    ? "bdtool-session-worker"
+                    : "bdtool-implementer";
+        var command = new FormationCommandData
+        {
+            Formation = _repository.CloneForOutput(formation, includeReceipts: false),
+            RequestId = request.RequestId,
+            Replayed = false,
+            SpawnRequest = new FormationSpawnRequestData
+            {
+                CanSpawn = true,
+                LeafOnly = true,
+                UserAuthorizationRequired = string.Equals(
+                    request.DispatchMode,
+                    DispatchModes.Session,
+                    StringComparison.Ordinal),
+                SessionAuthorizationId = attempt.SessionAuthorizationId,
+                DispatchMode = request.DispatchMode,
+                FormationId = formation.Id,
+                TaskId = task.Id,
+                AttemptId = attempt.Id,
+                RequestId = request.RequestId,
+                RequirementVersion = formation.RequirementVersion,
+                AgentProfile = profile,
+                Model = string.IsNullOrWhiteSpace(request.Model) ? seat.Model : request.Model,
+                Effort = string.IsNullOrWhiteSpace(request.Effort) ? seat.Effort : request.Effort,
+                Prompt = BuildSpawnPrompt(formation, task, profile),
+                Workspace = new FormationWorkspaceData
+                {
+                    Access = task.Workspace.Access,
+                    WritePaths = new List<string>(task.Workspace.WritePaths)
+                },
+                Acceptance = task.Acceptance,
+                MaxSubagents = attempt.EffectiveSubagentMax,
+                MaxDepth = attempt.EffectiveMaxDepth,
+                TimeoutMinutes = formation.Budget.TimeoutMinutes
+            }
+        };
+        return command;
+    }
+
+    private static string BuildSpawnPrompt(
+        FormationData formation,
+        FormationTaskData task,
+        string profile)
+    {
+        var paths = task.Workspace.WritePaths.Count == 0
+            ? "(只读)"
+            : string.Join(", ", task.Workspace.WritePaths);
+        return "你是 BDTool Formation 的一次性叶子执行者，禁止创建子智能体、创建线程或继续委派。\n"
+            + "Formation: " + formation.Id + "\n"
+            + "Task: " + task.Id + " - " + task.Title + "\n"
+            + "Profile: " + profile + "\n"
+            + "目标: " + task.Objective + "\n"
+            + "指令: " + task.Instructions + "\n"
+            + "验收: " + task.Acceptance + "\n"
+            + "访问: " + task.Workspace.Access + "\n"
+            + "允许写入: " + paths + "\n"
+            + "只能修改允许范围；返回实际变更、证据、未验证项，不得伪造测试或完成状态。";
     }
 
     private void ReviewTask(
@@ -581,13 +1001,49 @@ public sealed class FileFormationService : IFormationService
     private OperationResult<FormationCommandData> SuccessCommand(
         FormationData formation,
         string requestId,
-        bool replayed) =>
-        Success(new FormationCommandData
+        bool replayed,
+        Func<FormationData, FormationCommandData>? commandFactory = null)
+    {
+        var data = commandFactory?.Invoke(formation)
+            ?? new FormationCommandData
+            {
+                Formation = _repository.CloneForOutput(formation, includeReceipts: false)
+            };
+        data.RequestId = requestId;
+        data.Replayed = replayed;
+        return Success(data);
+    }
+
+    private OperationResult<FormationCommandData> FailureCommand(
+        FormationData formation,
+        string requestId,
+        string code,
+        string message,
+        OperationStatus status,
+        IReadOnlyDictionary<string, string>? details)
+    {
+        var result = new OperationResult<FormationCommandData>
         {
-            RequestId = requestId,
-            Formation = _repository.CloneForOutput(formation, includeReceipts: false),
-            Replayed = replayed
+            Status = status,
+            Data = new FormationCommandData
+            {
+                RequestId = requestId,
+                Formation = _repository.CloneForOutput(formation, includeReceipts: false),
+                Replayed = false
+            }
+        };
+        result.Errors.Add(new KernelError
+        {
+            Code = code,
+            Stage = "formation",
+            Message = message,
+            Retryable = false,
+            Details = details is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(details, StringComparer.Ordinal)
         });
+        return result;
+    }
 
     private static FormationSummary ToSummary(FormationData formation) => new()
     {

@@ -109,6 +109,166 @@ internal static class FormationStateMachine
         task.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public static FormationAttemptData PrepareRuntimeDispatch(
+        FormationData formation,
+        string taskId,
+        string dispatchMode,
+        string requestId,
+        string actorId,
+        string sessionAuthorizationId,
+        int effectiveMaxDepth)
+    {
+        EnsureFormationStatus(
+            formation,
+            FormationStatuses.InProgress,
+            "Formation 当前状态不允许生成派发包。");
+        var task = RequireTask(formation, taskId);
+        if (!string.Equals(task.State, FormationTaskStates.Ready, StringComparison.Ordinal))
+        {
+            throw Conflict("只有 Ready 任务可以生成派发包。", task.State, "state");
+        }
+
+        var seat = RequireSeat(formation, task.ExecutorSeatId, SeatRoles.Executor);
+        if (!string.Equals(seat.DispatchMode, dispatchMode, StringComparison.Ordinal))
+        {
+            throw Conflict(
+                "Executor 席位 DispatchMode 与派发模式不一致。",
+                seat.DispatchMode,
+                "dispatchMode");
+        }
+
+        if (!string.IsNullOrWhiteSpace(seat.ActiveTaskId)
+            && !string.Equals(seat.ActiveTaskId, task.Id, StringComparison.Ordinal))
+        {
+            throw Conflict("Executor 席位已有其他活动任务。", seat.ActiveTaskId, "activeTaskId");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        seat.ActiveTaskId = task.Id;
+        seat.AgentId = string.Empty;
+        seat.SessionId = string.Empty;
+        var attempt = new FormationAttemptData
+        {
+            Id = FormationRepository.NextId("attempt"),
+            RequestId = requestId,
+            DispatchMode = dispatchMode,
+            State = AttemptStates.Dispatching,
+            ActorKind = FormationActorKinds.Human,
+            ActorId = actorId,
+            SessionAuthorizationId = sessionAuthorizationId,
+            EffectiveSubagentMax = 0,
+            EffectiveMaxDepth = effectiveMaxDepth,
+            StartedAt = now
+        };
+        task.Attempts.Add(attempt);
+        task.State = FormationTaskStates.DispatchRequested;
+        task.UpdatedAt = now;
+        return attempt;
+    }
+
+    public static void BindRuntime(
+        FormationData formation,
+        string taskId,
+        string agentId,
+        string sessionId,
+        FormationHostAttestationData attestation)
+    {
+        EnsureFormationStatus(
+            formation,
+            FormationStatuses.InProgress,
+            "Formation 当前状态不允许绑定运行时身份。");
+        var task = RequireTask(formation, taskId);
+        if (!string.Equals(task.State, FormationTaskStates.DispatchRequested, StringComparison.Ordinal))
+        {
+            throw Conflict("只有 DispatchRequested 任务可以绑定运行时身份。", task.State, "state");
+        }
+
+        var attempt = RequireActiveAttempt(task, AttemptStates.Dispatching);
+        if (string.Equals(attempt.DispatchMode, DispatchModes.Native, StringComparison.Ordinal)
+            && string.IsNullOrWhiteSpace(agentId))
+        {
+            throw Conflict("Native 模式必须绑定真实 AgentId。", "missing-agent-id", "agentId");
+        }
+
+        if (string.Equals(attempt.DispatchMode, DispatchModes.Session, StringComparison.Ordinal)
+            && string.IsNullOrWhiteSpace(sessionId))
+        {
+            throw Conflict("Session 模式必须绑定真实 SessionId。", "missing-session-id", "sessionId");
+        }
+
+        if (string.Equals(attempt.DispatchMode, DispatchModes.Session, StringComparison.Ordinal))
+        {
+            var authorization = formation.SessionAuthorizations.FirstOrDefault(item =>
+                string.Equals(
+                    item.Id,
+                    attempt.SessionAuthorizationId,
+                    StringComparison.Ordinal));
+            if (authorization is null)
+            {
+                throw Conflict(
+                    "Session Attempt 缺少持久化的用户授权记录。",
+                    attempt.Id,
+                    "sessionAuthorizationId");
+            }
+
+            if (authorization.ExpiresAt is not null
+                && authorization.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                throw Conflict(
+                    "Session 用户授权已过期。",
+                    authorization.Id,
+                    "sessionAuthorizationId");
+            }
+
+            if (!string.IsNullOrWhiteSpace(authorization.Scope)
+                && !string.Equals(authorization.Scope, task.Id, StringComparison.Ordinal)
+                && !string.Equals(authorization.Scope, "*", StringComparison.Ordinal))
+            {
+                throw Conflict(
+                    "Session 用户授权范围不覆盖当前任务。",
+                    authorization.Scope,
+                    "authorizationScope");
+            }
+        }
+
+        var duplicateIdentity = formation.Tasks
+            .SelectMany(item => item.Attempts)
+            .Any(item =>
+                !string.Equals(item.Id, attempt.Id, StringComparison.Ordinal)
+                && ((!string.IsNullOrWhiteSpace(agentId)
+                        && string.Equals(item.AgentId, agentId.Trim(), StringComparison.Ordinal))
+                    || (!string.IsNullOrWhiteSpace(sessionId)
+                        && string.Equals(item.SessionId, sessionId.Trim(), StringComparison.Ordinal))));
+        if (duplicateIdentity)
+        {
+            throw Conflict(
+                "宿主身份已被本 Formation 的其他 Attempt 使用。",
+                string.IsNullOrWhiteSpace(agentId) ? sessionId : agentId,
+                string.IsNullOrWhiteSpace(agentId) ? "sessionId" : "agentId");
+        }
+
+        EnsureCanEnterRunning(agentId, sessionId);
+        var seat = RequireSeat(formation, task.ExecutorSeatId, SeatRoles.Executor);
+        var now = DateTimeOffset.UtcNow;
+        attempt.AgentId = agentId.Trim();
+        attempt.SessionId = sessionId.Trim();
+        attempt.BindingEvidence = attestation.Evidence;
+        attempt.BindingAttestation = new FormationHostAttestationData
+        {
+            HostId = attestation.HostId,
+            ToolCallId = attestation.ToolCallId,
+            CapturedAt = attestation.CapturedAt,
+            RawResultSha256 = attestation.RawResultSha256,
+            Evidence = attestation.Evidence
+        };
+        attempt.BoundAt = now;
+        attempt.State = AttemptStates.Running;
+        seat.AgentId = attempt.AgentId;
+        seat.SessionId = attempt.SessionId;
+        task.State = FormationTaskStates.Running;
+        task.UpdatedAt = now;
+    }
+
     public static void Submit(
         FormationData formation,
         string taskId,
@@ -116,12 +276,69 @@ internal static class FormationStateMachine
     {
         EnsureFormationStatus(formation, FormationStatuses.InProgress, "Formation 当前状态不允许提交。");
         var task = RequireTask(formation, taskId);
-        if (!string.Equals(task.State, FormationTaskStates.ManualInProgress, StringComparison.Ordinal))
+        if (!string.Equals(
+            task.State,
+            FormationTaskStates.ManualInProgress,
+            StringComparison.Ordinal))
         {
-            throw Conflict("只有 ManualInProgress 任务可以提交结果。", task.State, "state");
+            throw Conflict(
+                "人工 submit 只接受 ManualInProgress；Running 结果必须使用 collect。",
+                task.State,
+                "state");
         }
 
         var attempt = RequireActiveAttempt(task, AttemptStates.ManualInProgress);
+        CompleteSubmission(formation, task, attempt, submission);
+    }
+
+    public static void CollectRuntimeResult(
+        FormationData formation,
+        string taskId,
+        FormationSubmissionData submission)
+    {
+        EnsureFormationStatus(
+            formation,
+            FormationStatuses.InProgress,
+            "Formation 当前状态不允许回收结果。");
+        var task = RequireTask(formation, taskId);
+        if (!string.Equals(task.State, FormationTaskStates.Running, StringComparison.Ordinal))
+        {
+            throw Conflict("只有 Running 任务可以回收宿主结果。", task.State, "state");
+        }
+
+        var attempt = RequireActiveAttempt(task, AttemptStates.Running);
+        var boundIdentity = string.IsNullOrWhiteSpace(attempt.AgentId)
+            ? attempt.SessionId
+            : attempt.AgentId;
+        if (string.IsNullOrWhiteSpace(submission.AttributedAgentId)
+            || !string.Equals(
+                submission.AttributedAgentId,
+                boundIdentity,
+                StringComparison.Ordinal))
+        {
+            throw Conflict(
+                "Result 归属身份与绑定的 AgentId/SessionId 不一致。",
+                submission.AttributedAgentId,
+                "attributedAgentId");
+        }
+
+        if (submission.HostResult is null)
+        {
+            throw Conflict(
+                "Running 结果必须包含宿主来源引用。",
+                "missing-host-result",
+                "hostResult");
+        }
+
+        CompleteSubmission(formation, task, attempt, submission);
+    }
+
+    private static void CompleteSubmission(
+        FormationData formation,
+        FormationTaskData task,
+        FormationAttemptData attempt,
+        FormationSubmissionData submission)
+    {
         var now = submission.CreatedAt;
         attempt.State = AttemptStates.Submitted;
         attempt.CompletedAt = now;
@@ -245,6 +462,51 @@ internal static class FormationStateMachine
         task.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public static void MarkUnsupported(
+        FormationData formation,
+        string taskId,
+        string reason)
+    {
+        var task = RequireRuntimeTask(formation, taskId);
+        var attempt = RequireActiveAttempt(task, AttemptStates.Dispatching);
+        var now = DateTimeOffset.UtcNow;
+        attempt.State = AttemptStates.Unsupported;
+        attempt.CompletedAt = now;
+        attempt.FailureCode = string.IsNullOrWhiteSpace(reason)
+            ? "CAPABILITY_UNSUPPORTED"
+            : "CAPABILITY_UNSUPPORTED: " + reason;
+        task.State = FormationTaskStates.Unsupported;
+        task.UpdatedAt = now;
+        formation.Status = FormationStatuses.Blocked;
+        formation.BlockedReason = "CAPABILITY_UNSUPPORTED";
+        ClearActiveSeat(formation, task.ExecutorSeatId);
+    }
+
+    public static void MarkDeliveryUnknown(
+        FormationData formation,
+        string taskId,
+        string reason)
+    {
+        var task = RequireRuntimeTask(formation, taskId);
+        var attempt = task.Attempts.LastOrDefault(item => item.CompletedAt is null)
+            ?? throw Conflict("没有可标记结果未知的派发尝试。", "missing-attempt", "attempt");
+        if (attempt.State is not AttemptStates.Dispatching and not AttemptStates.Running)
+        {
+            throw Conflict("当前 Attempt 不能标记 DeliveryUnknown。", attempt.State, "state");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        attempt.State = AttemptStates.DeliveryUnknown;
+        attempt.CompletedAt = now;
+        attempt.FailureCode = string.IsNullOrWhiteSpace(reason)
+            ? "DELIVERY_UNKNOWN"
+            : reason;
+        task.State = FormationTaskStates.DeliveryUnknown;
+        task.UpdatedAt = now;
+        formation.Status = FormationStatuses.Blocked;
+        formation.BlockedReason = "DELIVERY_UNKNOWN";
+    }
+
     public static void CancelTask(FormationData formation, string taskId)
     {
         if (formation.Status is not FormationStatuses.InProgress and not FormationStatuses.Blocked)
@@ -253,48 +515,117 @@ internal static class FormationStateMachine
         }
 
         var task = RequireTask(formation, taskId);
-        if (task.State is FormationTaskStates.Passed or FormationTaskStates.Cancelled)
+        if (task.State is FormationTaskStates.Passed
+            or FormationTaskStates.Cancelled
+            or FormationTaskStates.Unsupported
+            or FormationTaskStates.DeliveryUnknown
+            or FormationTaskStates.CancelUnconfirmed)
         {
             throw Conflict("任务当前状态不允许取消。", task.State, "state");
+        }
+
+        if (task.State is FormationTaskStates.Running or FormationTaskStates.CancelRequested)
+        {
+            var attempt = task.Attempts.LastOrDefault(item => item.CompletedAt is null)
+                ?? throw Conflict("Running 任务缺少活动 Attempt。", "missing-attempt", "attempt");
+            attempt.State = AttemptStates.CancelRequested;
+            attempt.CancellationRequestedAt ??= DateTimeOffset.UtcNow;
+            task.State = FormationTaskStates.CancelRequested;
+            task.UpdatedAt = DateTimeOffset.UtcNow;
+            if (string.Equals(formation.Status, FormationStatuses.InProgress, StringComparison.Ordinal))
+            {
+                formation.Status = FormationStatuses.CancelRequested;
+                formation.BlockedReason = "CANCELLATION_REQUESTED";
+            }
+
+            return;
         }
 
         CancelAttempts(task, TaskCancelled);
         task.State = FormationTaskStates.Cancelled;
         task.UpdatedAt = DateTimeOffset.UtcNow;
         ClearActiveSeat(formation, task.ExecutorSeatId);
+    }
 
-        if (string.Equals(formation.Status, FormationStatuses.Blocked, StringComparison.Ordinal)
-            && !formation.Tasks.Any(item =>
-                string.Equals(item.State, FormationTaskStates.Blocked, StringComparison.Ordinal)))
+    public static void ConfirmTaskCancellation(
+        FormationData formation,
+        string taskId,
+        string cancellationEvidence)
+    {
+        if (formation.Status is not FormationStatuses.InProgress
+            and not FormationStatuses.CancelRequested)
         {
-            formation.Status = FormationStatuses.InProgress;
-            formation.BlockedReason = string.Empty;
+            throw Conflict("Formation 当前状态不允许确认取消。", formation.Status, "status");
+        }
+
+        var task = RequireTask(formation, taskId);
+        if (!string.Equals(task.State, FormationTaskStates.CancelRequested, StringComparison.Ordinal))
+        {
+            throw Conflict("任务没有待确认的取消请求。", task.State, "state");
+        }
+
+        var attempt = task.Attempts.LastOrDefault(item =>
+            string.Equals(item.State, AttemptStates.CancelRequested, StringComparison.Ordinal))
+            ?? throw Conflict("没有待确认的取消 Attempt。", taskId, "attempt");
+        attempt.State = AttemptStates.Cancelled;
+        attempt.CompletedAt = DateTimeOffset.UtcNow;
+        attempt.FailureCode = "TASK_CANCELLED_CONFIRMED";
+        attempt.CancellationEvidence = cancellationEvidence;
+        task.State = FormationTaskStates.Cancelled;
+        task.UpdatedAt = DateTimeOffset.UtcNow;
+        ClearActiveSeat(formation, task.ExecutorSeatId);
+        if (string.Equals(formation.Status, FormationStatuses.CancelRequested, StringComparison.Ordinal)
+            && formation.Tasks.All(item =>
+                string.Equals(item.State, FormationTaskStates.Cancelled, StringComparison.Ordinal)
+                || string.Equals(item.State, FormationTaskStates.Passed, StringComparison.Ordinal)))
+        {
+            formation.Status = FormationStatuses.Cancelled;
+            formation.BlockedReason = "TASK_CANCELLATION_CONFIRMED";
         }
     }
 
     public static void CancelFormation(FormationData formation)
     {
-        if (formation.Status is not FormationStatuses.InProgress and not FormationStatuses.Blocked)
+        if (formation.Status is not FormationStatuses.InProgress
+            and not FormationStatuses.Blocked
+            and not FormationStatuses.CancelRequested)
         {
             throw Conflict("Formation 当前状态不允许取消。", formation.Status, "status");
         }
 
         foreach (var task in formation.Tasks.Where(task =>
                      task.State is not FormationTaskStates.Passed
-                         and not FormationTaskStates.Cancelled))
+                         and not FormationTaskStates.Cancelled
+                         and not FormationTaskStates.Unsupported
+                         and not FormationTaskStates.DeliveryUnknown))
         {
+            if (task.State is FormationTaskStates.Running or FormationTaskStates.CancelRequested)
+            {
+                var attempt = task.Attempts.LastOrDefault(item => item.CompletedAt is null);
+                if (attempt is not null)
+                {
+                    attempt.State = AttemptStates.CancelRequested;
+                    attempt.CancellationRequestedAt ??= DateTimeOffset.UtcNow;
+                }
+
+                task.State = FormationTaskStates.CancelRequested;
+                task.UpdatedAt = DateTimeOffset.UtcNow;
+                continue;
+            }
+
             CancelAttempts(task, FormationCancelled);
             task.State = FormationTaskStates.Cancelled;
             task.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
-        foreach (var seat in formation.Seats)
-        {
-            seat.ActiveTaskId = string.Empty;
-        }
-
-        formation.Status = FormationStatuses.Cancelled;
-        formation.BlockedReason = FormationCancelled;
+        var awaitingConfirmation = formation.Tasks.Any(item =>
+            string.Equals(item.State, FormationTaskStates.CancelRequested, StringComparison.Ordinal));
+        formation.Status = awaitingConfirmation
+            ? FormationStatuses.CancelRequested
+            : FormationStatuses.Cancelled;
+        formation.BlockedReason = awaitingConfirmation
+            ? "CANCELLATION_REQUESTED"
+            : FormationCancelled;
     }
 
     public static void Archive(FormationData formation)
@@ -343,7 +674,30 @@ internal static class FormationStateMachine
         if (seat is not null)
         {
             seat.ActiveTaskId = string.Empty;
+            seat.AgentId = string.Empty;
+            seat.SessionId = string.Empty;
         }
+    }
+
+    private static FormationTaskData RequireRuntimeTask(
+        FormationData formation,
+        string taskId)
+    {
+        EnsureFormationStatus(
+            formation,
+            FormationStatuses.InProgress,
+            "Formation 当前状态不允许记录运行时结果。");
+        var task = RequireTask(formation, taskId);
+        if (task.State is not FormationTaskStates.DispatchRequested
+            and not FormationTaskStates.Running)
+        {
+            throw Conflict(
+                "任务不处于可记录运行时终态的阶段。",
+                task.State,
+                "state");
+        }
+
+        return task;
     }
 
     private static void EnsureFormationStatus(

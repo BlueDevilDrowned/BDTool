@@ -19,6 +19,8 @@ namespace BDTool.Contracts.Formation
         public List<FormationSeatData> Seats { get; set; } = new List<FormationSeatData>();
         public List<FormationTaskData> Tasks { get; set; } = new List<FormationTaskData>();
         public List<FormationArtifactData> Artifacts { get; set; } = new List<FormationArtifactData>();
+        public List<FormationSessionAuthorizationData> SessionAuthorizations { get; set; } =
+            new List<FormationSessionAuthorizationData>();
         public Dictionary<string, FormationRequestReceiptData> RequestReceipts { get; set; } =
             new Dictionary<string, FormationRequestReceiptData>(StringComparer.Ordinal);
         public DateTimeOffset CreatedAt { get; set; }
@@ -37,7 +39,7 @@ namespace BDTool.Contracts.Formation
         public int ReviewRetryMax { get; set; } = 2;
     }
 
-    /// <summary>编队席位。M7.1 的人工席位不会伪造 Agent/Session ID。</summary>
+    /// <summary>编队席位。仅宿主真实返回的身份可写入 AgentId/SessionId。</summary>
     public sealed class FormationSeatData
     {
         public string Id { get; set; } = string.Empty;
@@ -83,7 +85,7 @@ namespace BDTool.Contracts.Formation
         public DateTimeOffset UpdatedAt { get; set; }
     }
 
-    /// <summary>一次派发请求。M7.1 最多进入 Dispatching，不伪造 Running。</summary>
+    /// <summary>一次派发请求。Dispatching 仅表示申请已创建，不表示 Agent 已运行。</summary>
     public sealed class FormationAttemptData
     {
         public string Id { get; set; } = string.Empty;
@@ -96,6 +98,14 @@ namespace BDTool.Contracts.Formation
         public string ActorKind { get; set; } = FormationActorKinds.Human;
         public string ActorId { get; set; } = string.Empty;
         public DateTimeOffset StartedAt { get; set; }
+        public DateTimeOffset? BoundAt { get; set; }
+        public string BindingEvidence { get; set; } = string.Empty;
+        public FormationHostAttestationData? BindingAttestation { get; set; }
+        public string SessionAuthorizationId { get; set; } = string.Empty;
+        public int EffectiveSubagentMax { get; set; }
+        public int EffectiveMaxDepth { get; set; }
+        public DateTimeOffset? CancellationRequestedAt { get; set; }
+        public string CancellationEvidence { get; set; } = string.Empty;
         public DateTimeOffset? CompletedAt { get; set; }
         public string FailureCode { get; set; } = string.Empty;
     }
@@ -108,6 +118,8 @@ namespace BDTool.Contracts.Formation
         public string RequestId { get; set; } = string.Empty;
         public string ActorKind { get; set; } = FormationActorKinds.Human;
         public string ActorId { get; set; } = string.Empty;
+        public string AttributedAgentId { get; set; } = string.Empty;
+        public FormationHostResultReferenceData? HostResult { get; set; }
         public string Summary { get; set; } = string.Empty;
         public List<string> ChangedPaths { get; set; } = new List<string>();
         public List<FormationArtifactData> Artifacts { get; set; } = new List<FormationArtifactData>();
@@ -148,6 +160,40 @@ namespace BDTool.Contracts.Formation
         public string Sha256 { get; set; } = string.Empty;
     }
 
+    /// <summary>Coordinator 对宿主返回事实的声明；BDTool 记录但不宣称独立验证。</summary>
+    public sealed class FormationHostAttestationData
+    {
+        public string HostId { get; set; } = string.Empty;
+        public string ToolCallId { get; set; } = string.Empty;
+        public DateTimeOffset CapturedAt { get; set; }
+        public string RawResultSha256 { get; set; } = string.Empty;
+        public string Evidence { get; set; } = string.Empty;
+    }
+
+    /// <summary>一次 Session 创建的显式用户授权及其可审计范围。</summary>
+    public sealed class FormationSessionAuthorizationData
+    {
+        public string Id { get; set; } = string.Empty;
+        public string RequestId { get; set; } = string.Empty;
+        public string AuthorizedBy { get; set; } = string.Empty;
+        public DateTimeOffset GrantedAt { get; set; }
+        public DateTimeOffset? ExpiresAt { get; set; }
+        public string Scope { get; set; } = string.Empty;
+        public string SourceQuote { get; set; } = string.Empty;
+    }
+
+    /// <summary>Coordinator 从宿主读取结果时记录的来源引用。</summary>
+    public sealed class FormationHostResultReferenceData
+    {
+        public string HostId { get; set; } = string.Empty;
+        public string ThreadId { get; set; } = string.Empty;
+        public string TurnId { get; set; } = string.Empty;
+        public string MessageId { get; set; } = string.Empty;
+        public DateTimeOffset CollectedAt { get; set; }
+        public string ContentSha256 { get; set; } = string.Empty;
+        public string AttestedBy { get; set; } = string.Empty;
+    }
+
     /// <summary>持久化幂等回执，防止同一 requestId 被重复执行。</summary>
     public sealed class FormationRequestReceiptData
     {
@@ -163,7 +209,35 @@ namespace BDTool.Contracts.Formation
     {
         public string RequestId { get; set; } = string.Empty;
         public FormationData Formation { get; set; } = new FormationData();
+        public FormationSpawnRequestData? SpawnRequest { get; set; }
         public bool Replayed { get; set; }
+    }
+
+    /// <summary>
+    /// 交给 Codex Coordinator 的派发包。应用不执行 spawn；Coordinator 必须调用宿主工具后
+    /// 把真实 AgentId 或 SessionId 回填，不能把 canSpawn 当作已经运行。
+    /// </summary>
+    public sealed class FormationSpawnRequestData
+    {
+        public bool CanSpawn { get; set; }
+        public bool LeafOnly { get; set; } = true;
+        public bool UserAuthorizationRequired { get; set; }
+        public string SessionAuthorizationId { get; set; } = string.Empty;
+        public string DispatchMode { get; set; } = DispatchModes.Native;
+        public string FormationId { get; set; } = string.Empty;
+        public string TaskId { get; set; } = string.Empty;
+        public string AttemptId { get; set; } = string.Empty;
+        public string RequestId { get; set; } = string.Empty;
+        public int RequirementVersion { get; set; }
+        public string AgentProfile { get; set; } = string.Empty;
+        public string Model { get; set; } = string.Empty;
+        public string Effort { get; set; } = string.Empty;
+        public string Prompt { get; set; } = string.Empty;
+        public FormationWorkspaceData Workspace { get; set; } = new FormationWorkspaceData();
+        public string Acceptance { get; set; } = string.Empty;
+        public int MaxSubagents { get; set; }
+        public int MaxDepth { get; set; } = 1;
+        public int TimeoutMinutes { get; set; }
     }
 
     public sealed class FormationSummary

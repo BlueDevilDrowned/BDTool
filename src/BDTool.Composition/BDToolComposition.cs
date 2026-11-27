@@ -7,11 +7,13 @@ using BDTool.Application.Diagnostics;
 using BDTool.Application.Offline;
 using BDTool.Activity;
 using BDTool.Contracts;
+using BDTool.Contracts.Agents;
 using BDTool.Contracts.Editor;
 using BDTool.Contracts.Errors;
 using BDTool.Contracts.Operations;
 using BDTool.Contracts.Providers;
 using BDTool.Contracts.Skills;
+using BDTool.Core.Agents;
 using BDTool.Core.Skills;
 using BDTool.Operations.Catalog;
 using BDTool.Operations.Diagnostics;
@@ -37,6 +39,9 @@ public static class BDToolComposition
 
     /// <summary>发布包内 Skill 根目录相对路径，随 CLI 输出复制。</summary>
     private const string SkillsRelativePath = "skills";
+
+    /// <summary>发布包内固定 Agent Profile 根目录相对路径。</summary>
+    private const string AgentsRelativePath = "agents";
 
     /// <summary>
     /// 装配运行时：目录 + Workspace/可选 Editor Provider + Handler + 文件存储 + 网关。
@@ -225,6 +230,91 @@ public static class BDToolComposition
                 Message = exception.Message,
                 Retryable = false,
                 Details = new Dictionary<string, string>(StringComparer.Ordinal)
+            });
+            failure.Proof.Evidence["appVersion"] = appVersion;
+            return failure;
+        }
+    }
+
+    /// <summary>
+    /// 把发布包中的固定 Agent Profile 安装到项目级 .codex/agents。
+    /// 未受管同名文件产生冲突时不写入任何 Profile，也不生成 Activity。
+    /// </summary>
+    public static OperationResult<AgentProfileInstallResult> InstallProjectAgentProfiles(
+        string projectPath,
+        string? sourceAgentsRoot,
+        string appVersion)
+    {
+        if (string.IsNullOrWhiteSpace(appVersion))
+        {
+            throw new ArgumentException("应用版本不能为空。", nameof(appVersion));
+        }
+
+        var resolvedProjectPath = string.IsNullOrWhiteSpace(projectPath)
+            ? Directory.GetCurrentDirectory()
+            : projectPath;
+        var resolvedSourceRoot = string.IsNullOrWhiteSpace(sourceAgentsRoot)
+            ? Path.Combine(AppContext.BaseDirectory, AgentsRelativePath)
+            : sourceAgentsRoot;
+
+        try
+        {
+            var data = new AgentProfileInstaller(resolvedSourceRoot).Install(resolvedProjectPath);
+            var result = new OperationResult<AgentProfileInstallResult>
+            {
+                Status = data.Conflicts.Count == 0
+                    ? OperationStatus.Completed
+                    : OperationStatus.Failed,
+                Data = data
+            };
+            result.Proof.Evidence["appVersion"] = appVersion;
+            result.Proof.Evidence["scope"] = data.Scope;
+            if (data.Conflicts.Count > 0)
+            {
+                result.Errors.Add(new KernelError
+                {
+                    Code = ErrorCodes.PreconditionFailed,
+                    Stage = "agents",
+                    Message = "Agent Profile 安装目标存在冲突，未写入任何文件。",
+                    Retryable = false,
+                    Details = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["conflictCount"] = data.Conflicts.Count.ToString(
+                            CultureInfo.InvariantCulture),
+                        ["agentsRoot"] = data.AgentsRoot
+                    }
+                });
+            }
+
+            return result;
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException
+                or BDTool.Core.Workspace.PathPolicyException)
+        {
+            var failure = new OperationResult<AgentProfileInstallResult>
+            {
+                Status = OperationStatus.Failed,
+                Data = new AgentProfileInstallResult
+                {
+                    Scope = AgentProfileInstaller.ProjectScope,
+                    ProjectPath = resolvedProjectPath,
+                    AgentsRoot = string.Empty
+                }
+            };
+            failure.Errors.Add(new KernelError
+            {
+                Code = ErrorCodes.ExecutionFailed,
+                Stage = "agents",
+                Message = "Agent Profile 安装失败：" + exception.Message,
+                Retryable = false,
+                Details = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["exceptionType"] = exception.GetType().Name
+                }
             });
             failure.Proof.Evidence["appVersion"] = appVersion;
             return failure;

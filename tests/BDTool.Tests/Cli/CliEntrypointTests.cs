@@ -44,7 +44,7 @@ public sealed class CliEntrypointTests
         var data = root.GetProperty("data");
         Assert.Equal(JsonValueKind.Object, data.ValueKind);
         Assert.Equal("ready", data.GetProperty("state").GetString());
-        Assert.Equal("M7.1", data.GetProperty("milestone").GetString());
+        Assert.Equal("M7", data.GetProperty("milestone").GetString());
         Assert.Equal("1.2.0", data.GetProperty("appVersion").GetString());
         Assert.Equal(BDToolContract.Version, data.GetProperty("contractVersion").GetString());
         Assert.Equal(Path.GetFullPath(project.ProjectPath), data.GetProperty("projectPath").GetString());

@@ -107,7 +107,7 @@ internal static class FormationCli
 {
     private static readonly HashSet<string> s_flagOptions = new(StringComparer.Ordinal)
     {
-        "human", "json", "include-receipts", "passed", "failed"
+        "human", "json", "include-receipts", "passed", "failed", "user-authorized"
     };
 
     private static readonly HashSet<string> s_multiOptions = new(StringComparer.Ordinal)
@@ -123,7 +123,9 @@ internal static class FormationCli
         "role", "display-name", "agent-profile", "model", "effort", "access",
         "subagent-max", "title", "instructions", "acceptance", "executor-seat",
         "reviewer-seat", "review-retry-max", "summary", "submission", "feedback",
-        "rework-instruction", "actor-id"
+        "rework-instruction", "actor-id", "dispatch-mode", "agent-id", "session-id",
+        "binding-evidence", "reason", "host-attestation-json", "host-result-json",
+        "cancellation-evidence", "authorization-quote", "authorization-scope"
     };
 
     public static FormationParseResult Parse(string[] args)
@@ -281,6 +283,38 @@ internal static class FormationCli
                     return await runtime.Formation.PrepareReworkAsync(
                         BuildTaskCommand(invocation.Arguments),
                         cancellationToken).ConfigureAwait(false);
+                case "task.native-prepare":
+                    return await runtime.Formation.PrepareTaskDispatchAsync(
+                        BuildPrepareDispatch(invocation.Arguments, DispatchModes.Native),
+                        cancellationToken).ConfigureAwait(false);
+                case "task.session-prepare":
+                    return await runtime.Formation.PrepareTaskDispatchAsync(
+                        BuildPrepareDispatch(invocation.Arguments, DispatchModes.Session),
+                        cancellationToken).ConfigureAwait(false);
+                case "task.bind-agent":
+                    return await runtime.Formation.BindTaskRuntimeAsync(
+                        BuildBindRuntime(invocation.Arguments, bindAgent: true),
+                        cancellationToken).ConfigureAwait(false);
+                case "task.bind-session":
+                    return await runtime.Formation.BindTaskRuntimeAsync(
+                        BuildBindRuntime(invocation.Arguments, bindAgent: false),
+                        cancellationToken).ConfigureAwait(false);
+                case "task.collect":
+                    return await runtime.Formation.CollectTaskResultAsync(
+                        BuildCollect(invocation.Arguments),
+                        cancellationToken).ConfigureAwait(false);
+                case "task.cancel-confirm":
+                    return await runtime.Formation.ConfirmTaskCancellationAsync(
+                        BuildCancellationConfirmation(invocation.Arguments),
+                        cancellationToken).ConfigureAwait(false);
+                case "task.unsupported":
+                    return await runtime.Formation.MarkTaskUnsupportedAsync(
+                        BuildRuntimeFailure(invocation.Arguments),
+                        cancellationToken).ConfigureAwait(false);
+                case "task.delivery-unknown":
+                    return await runtime.Formation.MarkTaskDeliveryUnknownAsync(
+                        BuildRuntimeFailure(invocation.Arguments),
+                        cancellationToken).ConfigureAwait(false);
                 case "task.cancel":
                     return await runtime.Formation.CancelTaskAsync(
                         BuildTaskCommand(invocation.Arguments),
@@ -340,6 +374,7 @@ internal static class FormationCli
         AgentProfile = arguments.GetOptional("agent-profile") ?? string.Empty,
         Model = arguments.GetOptional("model") ?? string.Empty,
         Effort = arguments.GetOptional("effort") ?? string.Empty,
+        DispatchMode = ParseDispatchMode(arguments.GetOptional("dispatch-mode")),
         Access = ResolveAccess(arguments),
         WritePaths = arguments.GetMany("write-path"),
         SubagentMax = arguments.GetOptionalInt("subagent-max") ?? 0,
@@ -376,6 +411,78 @@ internal static class FormationCli
         RequestId = arguments.GetRequired("request-id"),
         ActorId = arguments.GetOptional("actor-id") ?? "manual-user"
     };
+
+    private static PrepareTaskDispatchRequest BuildPrepareDispatch(
+        FormationArguments arguments,
+        string dispatchMode) => new()
+        {
+            FormationId = arguments.GetRequired("formation"),
+            TaskId = arguments.GetRequired("task"),
+            RequestId = arguments.GetRequired("request-id"),
+            ActorId = arguments.GetOptional("actor-id") ?? "coordinator",
+            DispatchMode = dispatchMode,
+            UserAuthorized = arguments.HasFlag("user-authorized"),
+            AuthorizationQuote = arguments.GetOptional("authorization-quote") ?? string.Empty,
+            AuthorizationScope = arguments.GetOptional("authorization-scope") ?? string.Empty,
+            AgentProfile = arguments.GetOptional("agent-profile") ?? string.Empty,
+            Model = arguments.GetOptional("model") ?? string.Empty,
+            Effort = arguments.GetOptional("effort") ?? string.Empty
+        };
+
+    private static BindTaskRuntimeRequest BuildBindRuntime(
+        FormationArguments arguments,
+        bool bindAgent) => new()
+        {
+            FormationId = arguments.GetRequired("formation"),
+            TaskId = arguments.GetRequired("task"),
+            RequestId = arguments.GetRequired("request-id"),
+            ActorId = arguments.GetOptional("actor-id") ?? "coordinator",
+            AgentId = bindAgent ? arguments.GetRequired("agent-id") : string.Empty,
+            SessionId = bindAgent ? string.Empty : arguments.GetRequired("session-id"),
+            BindingEvidence = arguments.GetOptional("binding-evidence") ?? string.Empty,
+            HostAttestation = ParseJson<FormationHostAttestationData>(
+            arguments.GetRequired("host-attestation-json"))
+            ?? throw new FormationCliParseException("--host-attestation-json 不能为 null。")
+        };
+
+    private static ReportTaskRuntimeFailureRequest BuildRuntimeFailure(
+        FormationArguments arguments) => new()
+        {
+            FormationId = arguments.GetRequired("formation"),
+            TaskId = arguments.GetRequired("task"),
+            RequestId = arguments.GetRequired("request-id"),
+            ActorId = arguments.GetOptional("actor-id") ?? "coordinator",
+            Reason = arguments.GetOptional("reason") ?? string.Empty
+        };
+
+    private static CollectFormationTaskResultRequest BuildCollect(
+        FormationArguments arguments) => new()
+        {
+            FormationId = arguments.GetRequired("formation"),
+            TaskId = arguments.GetRequired("task"),
+            RequestId = arguments.GetRequired("request-id"),
+            ActorId = arguments.GetOptional("actor-id") ?? "coordinator",
+            Summary = arguments.GetRequired("summary"),
+            ChangedPaths = arguments.GetMany("changed-path"),
+            Artifacts = arguments.GetMany("artifact-json")
+            .Select(value => ParseJson<FormationArtifactData>(value)
+                ?? throw new FormationCliParseException("--artifact-json 不能为 null。"))
+            .ToList(),
+            Unverified = arguments.GetMany("unverified"),
+            HostResult = ParseJson<FormationHostResultReferenceData>(
+            arguments.GetRequired("host-result-json"))
+            ?? throw new FormationCliParseException("--host-result-json 不能为 null。")
+        };
+
+    private static ConfirmTaskCancellationRequest BuildCancellationConfirmation(
+        FormationArguments arguments) => new()
+        {
+            FormationId = arguments.GetRequired("formation"),
+            TaskId = arguments.GetRequired("task"),
+            RequestId = arguments.GetRequired("request-id"),
+            ActorId = arguments.GetOptional("actor-id") ?? "coordinator",
+            CancellationEvidence = arguments.GetRequired("cancellation-evidence")
+        };
 
     private static SubmitFormationTaskRequest BuildSubmit(FormationArguments arguments) => new()
     {
@@ -451,6 +558,26 @@ internal static class FormationCli
 
         return match;
     }
+
+    private static string ParseDispatchMode(string? value)
+    {
+        var modes = new[] { DispatchModes.Manual, DispatchModes.Native, DispatchModes.Session };
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return DispatchModes.Manual;
+        }
+
+        var match = modes.FirstOrDefault(mode =>
+            string.Equals(mode, value.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            throw new FormationCliParseException(
+                "--dispatch-mode 必须是 " + string.Join("、", modes) + "。");
+        }
+
+        return match;
+    }
+
     private static T? ParseJson<T>(string? json)
     {
         if (json is null)

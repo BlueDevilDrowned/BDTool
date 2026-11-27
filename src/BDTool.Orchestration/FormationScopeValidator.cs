@@ -78,6 +78,17 @@ internal sealed class FormationScopeValidator
         return actorId;
     }
 
+    public string ValidateSha256(string? value, string field)
+    {
+        var sha256 = RequireText(value, field);
+        if (sha256.Length != 64 || sha256.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw Invalid(field + " 必须是 64 位十六进制 SHA-256。", field);
+        }
+
+        return sha256.ToLowerInvariant();
+    }
+
     public void ValidateChoice(
         string value,
         IReadOnlyList<string> allowed,
@@ -182,12 +193,6 @@ internal sealed class FormationScopeValidator
         var result = new List<FormationArtifactData>();
         foreach (var artifact in artifacts ?? new List<FormationArtifactData>())
         {
-            var sha256 = RequireText(artifact.Sha256, "artifact.sha256");
-            if (sha256.Length != 64 || sha256.Any(character => !Uri.IsHexDigit(character)))
-            {
-                throw Invalid("artifact.sha256 必须是 64 位十六进制 SHA-256。", "artifact.sha256");
-            }
-
             result.Add(new FormationArtifactData
             {
                 Kind = RequireText(artifact.Kind, "artifact.kind"),
@@ -195,7 +200,7 @@ internal sealed class FormationScopeValidator
                     RequireText(artifact.Path, "artifact.path"),
                     "artifact.path",
                     allowStatePath: true),
-                Sha256 = sha256.ToLowerInvariant()
+                Sha256 = ValidateSha256(artifact.Sha256, "artifact.sha256")
             });
         }
 
@@ -341,7 +346,17 @@ internal sealed class FormationScopeValidator
             relative = PathPolicy.NormalizeRelativePath(relative);
             var isStatePath = string.Equals(relative, ".bdtool", PathPolicy.PathComparison)
                 || relative.StartsWith(".bdtool/", PathPolicy.PathComparison);
-            if (!allowStatePath && isStatePath)
+            if (allowStatePath
+                && !relative.StartsWith(".bdtool/artifacts/", PathPolicy.PathComparison))
+            {
+                if (isStatePath)
+                {
+                    throw Invalid(
+                        field + " 只能引用 .bdtool/artifacts 下的证据文件。",
+                        field);
+                }
+            }
+            else if (!allowStatePath && isStatePath)
             {
                 throw Invalid(field + " 不能指向 BDTool 内部状态目录。", field);
             }

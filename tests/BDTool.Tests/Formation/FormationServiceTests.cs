@@ -400,6 +400,25 @@ public sealed class FormationServiceTests
             TaskCommand("formation-main", "task-valid", "start-scope"),
             CancellationToken.None));
         var changedEscapeHash = FileHash(GetStatePath(project.ProjectPath, "formation-main"));
+        var stateArtifact = await service.SubmitTaskAsync(
+            new SubmitFormationTaskRequest
+            {
+                FormationId = "formation-main",
+                TaskId = "task-valid",
+                RequestId = "artifact-state",
+                Summary = "状态文件不能作为 Artifact",
+                Artifacts = new List<FormationArtifactData>
+                {
+                    new()
+                    {
+                        Kind = "json",
+                        Path = ".bdtool/state/formations/formation-main.json",
+                        Sha256 = new string('d', 64)
+                    }
+                }
+            },
+            CancellationToken.None);
+        AssertFailed(stateArtifact, ErrorCodes.InvalidArgument);
         var changedEscape = await service.SubmitTaskAsync(
             new SubmitFormationTaskRequest
             {

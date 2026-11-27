@@ -9,6 +9,7 @@ using BDTool.Application;
 using BDTool.Composition;
 using BDTool.Contracts;
 using BDTool.Contracts.Activity;
+using BDTool.Contracts.Agents;
 using BDTool.Contracts.Errors;
 using BDTool.Contracts.Gateway;
 using BDTool.Contracts.Operations;
@@ -119,6 +120,11 @@ public static class CliEntrypoint
         if (string.Equals(command, "skills", StringComparison.Ordinal))
         {
             return RunSkillsCommand(args, stdout, stderr, cancellationToken);
+        }
+
+        if (string.Equals(command, "agents", StringComparison.Ordinal))
+        {
+            return RunAgentsCommand(args, stdout, stderr, cancellationToken);
         }
 
         if (string.Equals(command, "run", StringComparison.Ordinal))
@@ -258,6 +264,74 @@ public static class CliEntrypoint
             sourceSkillsRoot: null,
             BDToolIdentity.Version);
         WriteSkillsResult(result, options, stdout, stderr);
+        return (int)ExitCodePolicy.Map(result);
+    }
+
+    /// <summary>
+    /// agents install 是项目级配置安装路由，不进入 Gateway，也不创建 Activity。
+    /// 未受管同名文件冲突时安装器采用全量预检并拒绝写入。
+    /// </summary>
+    private static int RunAgentsCommand(
+        string[] args,
+        TextWriter stdout,
+        TextWriter stderr,
+        CancellationToken cancellationToken)
+    {
+        if (args.Length < 2
+            || !string.Equals(args[1], "install", StringComparison.Ordinal))
+        {
+            return WriteInvalidArgument(
+                "agents 需要 install 子命令。",
+                new CliOptions(),
+                stdout,
+                stderr);
+        }
+
+        var parse = CliOptionParser.Parse(
+            args,
+            startIndex: 2,
+            allowOperationOptions: false,
+            allowRuntimeOptions: false);
+        if (parse.Error is not null)
+        {
+            return WriteInvalidArgument(parse.Error, InferOutputMode(args), stdout, stderr);
+        }
+
+        var options = parse.Options!;
+        cancellationToken.ThrowIfCancellationRequested();
+        var result = BDToolComposition.InstallProjectAgentProfiles(
+            options.ProjectPath,
+            sourceAgentsRoot: null,
+            BDToolIdentity.Version);
+        if (options.Human)
+        {
+            stdout.WriteLine("status: " + JsonNamingPolicy.CamelCase.ConvertName(result.Status.ToString()));
+            stdout.WriteLine("scope: " + result.Data.Scope);
+            stdout.WriteLine("project: " + result.Data.ProjectPath);
+            stdout.WriteLine("agentsRoot: " + result.Data.AgentsRoot);
+            foreach (var profile in result.Data.Profiles)
+            {
+                stdout.WriteLine(
+                    $"profile: {profile.Name}\t{(profile.Updated ? "updated" : "installed")}\t" +
+                    profile.DestinationPath);
+            }
+
+            foreach (var conflict in result.Data.Conflicts)
+            {
+                stderr.WriteLine(
+                    $"bdtool: conflict {conflict.Name} {conflict.DestinationPath}: {conflict.Reason}");
+            }
+
+            foreach (var error in result.Errors)
+            {
+                stderr.WriteLine($"bdtool: {error.Code} ({error.Stage}) {error.Message}");
+            }
+        }
+        else
+        {
+            stdout.WriteLine(CliOutput.SerializeResult(result));
+        }
+
         return (int)ExitCodePolicy.Map(result);
     }
 
@@ -717,6 +791,7 @@ public static class CliEntrypoint
         writer.WriteLine("  bdtool operations list [--project <path>] [--human]");
         writer.WriteLine("  bdtool operations describe <id> [--project <path>] [--human]");
         writer.WriteLine("  bdtool skills install [--project <path>] [--scope project] [--human] [--json]");
+        writer.WriteLine("  bdtool agents install [--project <path>] [--human] [--json]");
         writer.WriteLine("  bdtool run <id> [--input <file> | --input-json <json>] [--dry-run] [--project <path>] [--editor-provider akio|official] [--unity-cli <exe>] [--human]");
         writer.WriteLine("  bdtool <id> [--input <file> | --input-json <json>] [--project <path>] [--editor-provider akio|official] [--unity-cli <exe>] [--human]");
         writer.WriteLine("  bdtool activity list|show <activityId> [--project <path>] [--human]");
@@ -724,6 +799,12 @@ public static class CliEntrypoint
         writer.WriteLine("  bdtool formation seat add --formation <id> --id <id> --role <role> --display-name <text> [--access read|write --write-path <path>]... --request-id <id|auto>");
         writer.WriteLine("  bdtool formation task create --formation <id> --id <id> --title <text> --objective <text> --instructions <text> --acceptance <text> --executor-seat <id> --reviewer-seat <id> [--access read|write] [--write-path <path>]... --request-id <id|auto>");
         writer.WriteLine("  bdtool formation task dispatch|start|rework|cancel --formation <id> --task <id> --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task native-prepare|session-prepare --formation <id> --task <id> [--user-authorized --authorization-quote <quote>] --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task bind-agent --formation <id> --task <id> --agent-id <real-id> --host-attestation-json <json> --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task bind-session --formation <id> --task <id> --session-id <real-id> --host-attestation-json <json> --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task collect --formation <id> --task <id> --summary <text> --host-result-json <json> --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task cancel-confirm --formation <id> --task <id> --cancellation-evidence <source> --request-id <id|auto>");
+        writer.WriteLine("  bdtool formation task unsupported|delivery-unknown --formation <id> --task <id> [--reason <text>] --request-id <id|auto>");
         writer.WriteLine("  bdtool formation task submit --formation <id> --task <id> --summary <text> [--changed-path <path>]... --request-id <id|auto>");
         writer.WriteLine("  bdtool formation task review --formation <id> --task <id> --submission <id> --passed|--failed --request-id <id|auto>");
         writer.WriteLine("  bdtool formation cancel|archive --formation <id> --request-id <id|auto>");
@@ -732,7 +813,7 @@ public static class CliEntrypoint
         writer.WriteLine("  bdtool --version | --help");
         writer.WriteLine();
         writer.WriteLine("M6 范围: 本地 Workspace、Akio/Official Editor Provider、项目级 Codex Skill 与 stdio MCP Adapter。");
-        writer.WriteLine("M7.1 范围: 人工编队、席位、任务、提交与审核的本地持久化；formation mutation 不创建 Activity。");
+        writer.WriteLine("M7 范围: 人工编队、真实 Agent/Session 身份回填、叶子派发与项目级 Agent Profile；formation mutation 不创建 Activity。");
         writer.WriteLine("Akio unity-cli 发现顺序: --unity-cli → BDTOOL_UNITY_CLI_PATH → 当前目录及祖先 .tools/unity-cli → PATH（只读，不改 PATH）。");
         writer.WriteLine();
         writer.WriteLine("退出码:");

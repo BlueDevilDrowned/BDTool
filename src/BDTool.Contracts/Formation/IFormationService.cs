@@ -5,8 +5,8 @@ using BDTool.Contracts.Operations;
 namespace BDTool.Contracts.Formation
 {
     /// <summary>
-    /// M7.1 人工编队服务。所有 mutation 通过 requestId 幂等；
-    /// 这里不创建 Agent、不绑定 Session，也不改变 Provider 权限。
+    /// M7 Formation 服务。所有 mutation 通过 requestId 幂等；
+    /// 这里不直接创建宿主 Agent/Session，也不改变 Provider 权限。
     /// </summary>
     public interface IFormationService
     {
@@ -42,8 +42,32 @@ namespace BDTool.Contracts.Formation
             TaskCommandRequest request,
             CancellationToken cancellationToken);
 
+        Task<OperationResult<FormationCommandData>> PrepareTaskDispatchAsync(
+            PrepareTaskDispatchRequest request,
+            CancellationToken cancellationToken);
+
+        Task<OperationResult<FormationCommandData>> BindTaskRuntimeAsync(
+            BindTaskRuntimeRequest request,
+            CancellationToken cancellationToken);
+
+        Task<OperationResult<FormationCommandData>> CollectTaskResultAsync(
+            CollectFormationTaskResultRequest request,
+            CancellationToken cancellationToken);
+
+        Task<OperationResult<FormationCommandData>> MarkTaskUnsupportedAsync(
+            ReportTaskRuntimeFailureRequest request,
+            CancellationToken cancellationToken);
+
+        Task<OperationResult<FormationCommandData>> MarkTaskDeliveryUnknownAsync(
+            ReportTaskRuntimeFailureRequest request,
+            CancellationToken cancellationToken);
+
         Task<OperationResult<FormationCommandData>> CancelTaskAsync(
             TaskCommandRequest request,
+            CancellationToken cancellationToken);
+
+        Task<OperationResult<FormationCommandData>> ConfirmTaskCancellationAsync(
+            ConfirmTaskCancellationRequest request,
             CancellationToken cancellationToken);
 
         Task<OperationResult<FormationCommandData>> CancelFormationAsync(

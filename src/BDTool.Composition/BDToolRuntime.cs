@@ -45,7 +45,7 @@ public sealed class BDToolRuntime
     /// </summary>
     public IActivityQuery ActivityQuery { get; }
 
-    /// <summary>M7.1 人工编队服务；CLI 经组合根访问，不直接依赖 Orchestration。</summary>
+    /// <summary>M7 Formation 服务；CLI 经组合根访问，不直接依赖 Orchestration。</summary>
     public IFormationService Formation { get; }
 
     /// <summary>解析后的项目路径。</summary>
